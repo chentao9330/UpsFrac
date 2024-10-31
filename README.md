@@ -1,4 +1,17 @@
 # UpsFrac
+
+UpsFrac is a scale-up software designed to enhance the analysis of fracture systems in geosciences. This tool provides advanced algorithms for processing and interpreting geochemical data from geothermal reservoirs.
+
+## Why Use UpsFrac?
+
+UpsFrac allows researchers and professionals in geosciences to:
+- Improve the accuracy of geochemical analyses.
+- Efficiently process large datasets.
+- Gain insights into the behavior of fracture systems in geothermal environments.
+
+- 
+
+# UpsFrac
 A modeling and upscaling software for two-dimensional fractured porous rocks.
 
 
