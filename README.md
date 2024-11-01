@@ -24,18 +24,21 @@ DFM_simulation: developed based on MRST
 
 ## Software Usage Steps
 ### Step 1: Run DiscreteFractureModeling.m
-Requirements: rndm_powerlaw.m, frac_deterministic.txt  
+Requirements: DFM_modeling, frac_deterministic.txt (optional)
+Input: fracture geometry parameters
 Output: Fracture geometric files (e.g., frac_0_1.txt)  
 
 ### Step 2: Run SubDivideToGrid.m
+Input: dimensions of a coarse grid
 Output: Clipped fracture geometry in a coarse grid (e.g., resu_0_1.txt)  
 
 ### Step 3: Run DiscreteFractureInput.m
-Requirements: Create InputTemplate_mpfa.m or use InputTemplate_tpfa.m  
+Requirements: input file template for dfm simulation on each coarse grid, InputTemplate_tpfa.m or InputTemplate_mpfa.m
 Output: DFM simulation input files in folders (e.g., reali_1 folder)  
 
 ### Step 4: Run GridDFMSimu.m
-Perform DFM simulation with the framework of MRST  
+Perform DFM simulation with the framework of MRST
+Requirements: DFM_simulation 
 Output: Flow simulation results in the folder \reali_1\RESULT  
 
 ### Step 5: Calculate upscaled equivalent permeability, keq, for a coarse grid
