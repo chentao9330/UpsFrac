@@ -24,8 +24,8 @@ DFM_simulation: developed based on MRST
 
 ## Software Usage Steps
 ### Step 1: Run DiscreteFractureModeling.m
-Requirements: DFM_modeling, frac_deterministic.txt (optional)
-Input: fracture geometry parameters
+Requirements: DFM_modeling, frac_deterministic.txt (optional)  
+Input: fracture geometry parameters  
 Output: Fracture geometric files (e.g., frac_0_1.txt)  
 
 ### Step 2: Run SubDivideToGrid.m
