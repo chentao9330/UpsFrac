@@ -1,0 +1,336 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Example 5: Hybrid Grids</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="example5.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Example 5: Hybrid Grids</h1><!--introduction--><p>In this example we discuss how to combine flow adaption with a regular partition, which can be done in several ways.</p><p><b>References:</b></p><div><ol><li>V. L. Hauge, K.-A. Lie, J. R. Natvig,   Grid coarsening based on amalgamation for multi-fidelity transport   solvers, September 2010,   <a href="http://www.sintef.no/Projectweb/GeoScale/Publications/">http://www.sintef.no/Projectweb/GeoScale/Publications/</a></li></ol></div><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Set up and solve flow problem</a></li><li><a href="#3">Combine a Uniform and a Flow-Based Partition</a></li><li><a href="#7">Compare Uniform, NUC, and Hybrid Grids</a></li></ul></div><h2>Set up and solve flow problem<a name="1"></a></h2><p>As our example, we consider a standard five spot with heterogeneity sampled from Model 2 of the 10th SPE Comparative Solution Project.</p><pre class="codeinput"><span class="keyword">try</span>
+   require <span class="string">spe10</span>
+<span class="keyword">catch</span> me
+   mrstModule <span class="string">add</span> <span class="string">spe10</span>;
+<span class="keyword">end</span>
+
+<span class="keyword">try</span>
+   require <span class="string">gridtools</span>
+<span class="keyword">catch</span> me
+   mrstModule <span class="string">add</span> <span class="string">gridtools</span>;
+<span class="keyword">end</span>
+
+<span class="keyword">try</span>
+   require <span class="string">coarsegrid</span>
+<span class="keyword">catch</span> me
+   mrstModule <span class="string">add</span> <span class="string">coarsegrid</span>;
+<span class="keyword">end</span>
+
+[G, W, rock] = SPE10_setup(25);
+rock.poro = max(rock.poro, 1e-4);
+fluid = initSingleFluid(<span class="string">'mu'</span>, 1*centi*poise, <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+rS = initState(G, W, 0);
+S  = computeMimeticIP(G, rock);
+rS = solveIncompFlow(rS, G, S, fluid, <span class="string">'wells'</span>, W);
+</pre><p>Compute flow indicators based on velocity and time-of-flight</p><pre class="codeinput">iK = log10(rock.perm(:,1)); iK = iK - min(iK) + 1;
+v  = faceFlux2cellVelocity(G, rS.flux); v  = sqrt(sum(v .^ 2, 2));
+iV = log10(v); iV = iV - min(iV) + 1;
+T  = computeTimeOfFlight(rS, G, rock, <span class="string">'wells'</span>, W);
+Tr = computeTimeOfFlight(rS, G, rock, <span class="string">'wells'</span>, W, <span class="string">'reverse'</span>, true);
+iT = -log10(T.*Tr); iT = iT - min(iT) + 1;
+</pre><h2>Combine a Uniform and a Flow-Based Partition<a name="3"></a></h2><p>As our first example of a hybrid grid we will combine a uniform partition with a segmentation based on velocities. The two partitions are generated independently and then merged using the builtin 'unique' function (which may be expensive for very large grids). Afterwards, we process the partition to check for disconnected blocks that need to be split.</p><pre class="codeinput">clf
+p1 = segmentIndicator(G, iV, 4);
+pS = partitionUI(G, [3,6,1]);
+[b, i, p] = unique([pS, p1], <span class="string">'rows'</span>); <span class="comment">%#ok&lt;*ASGLU&gt;</span>
+p  = processPartition(G, p);
+subplot(1,3,1), title(<span class="string">'Segmented'</span>)
+plotCellData(G,iV), outlineCoarseGrid(G,p1); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+subplot(1,3,2), title(<span class="string">'Static'</span>)
+plotCellData(G,iV), outlineCoarseGrid(G,pS); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+subplot(1,3,3), title(<span class="string">'Combined'</span>)
+plotCellData(G,iV), outlineCoarseGrid(G,p); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+</pre><img vspace="5" hspace="5" src="example5_01.png" alt=""> <p>If the <i>a priori</i> partitioning should be preserved throughout the coarsening, we specify it in the option <tt>'static_partition'</tt> in the call to <tt>mergeBlocks</tt>. Then the interfaces in this partitioning will not be crossed.</p><pre class="codeinput">p1 = mergeBlocks(p, G, iV, iV, 30);
+p2 = mergeBlocks(p, G, iV, iV, 30, <span class="string">'static_partition'</span>, pS);
+</pre><p>We then plot the result to confirm that the uniform partition is preserved in <tt>p2</tt>.</p><pre class="codeinput">clf;
+subplot(1,2,1);
+plotCellData(G, iV);
+h1 = outlineCoarseGrid(G, p1); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>;
+title(<span class="string">'Without preserved partitioning'</span>);
+
+subplot(1,2,2);
+plotCellData(G, iV);
+outlineCoarseGrid(G, pS,<span class="string">'EdgeColor'</span>,[.8 .8 .8],<span class="string">'LineWidth'</span>,4);
+h2 = outlineCoarseGrid(G, p2); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>;
+title(<span class="string">'With preserved static partitioning'</span>);
+</pre><img vspace="5" hspace="5" src="example5_02.png" alt=""> <p>Both partitions would typically be used as input to further refinement and merging steps. If not, we should get grid of all blocks that are confined within another block.</p><pre class="codeinput">delete([h1, h2])
+subplot(1,2,1),
+[blks, p1] = findConfinedBlocks(G,p1);
+outlineCoarseGrid(G, p1);
+
+subplot(1,2,2),
+[blks, p2] = findConfinedBlocks(G,p2);
+outlineCoarseGrid(G, p2);
+</pre><img vspace="5" hspace="5" src="example5_03.png" alt=""> <h2>Compare Uniform, NUC, and Hybrid Grids<a name="7"></a></h2><p>In the next example, we compare three different algorithms</p><div><ul><li>the standard NUC algorithm with time-of-flight and velocity indicator</li><li>the combination of a Cartesian partition with a NUC partition based upon the time-of-flight indicator</li><li>the combination of a static coarse Cartesian partition and a NUC partition based upon the velocity indicator</li></ul></div><p>The parameters in the methods are chose so that the number of coarse blocks should be somewhat lower than the 528 blocks in a 12 x 44 uniform Cartesian partition.</p><pre class="codeinput">clf
+cgDims = [12 44 1];
+NB = prod(bsxfun(@rdivide, G.cartDims, cgDims));
+NL = .5*NB;
+NU = 1.1*NB;
+
+pu = partitionUI(G, cgDims);
+pt = segmentIndicator(G, iT, 12);
+p = mergeBlocks(pt, G, rock.poro, iT, NL);
+p = refineBlocks(p, G, iT, NU, @refineGreedy2);
+p = mergeBlocks(p, G, rock.poro, iT, NL);
+subplot(1,4,1)
+plotCellData(G, iT), outlineCoarseGrid(G,p);
+axis <span class="string">tight</span> <span class="string">off</span>, title(sprintf(<span class="string">'TOF:\n%d blocks'</span>, max(p)));
+
+[b,j,p]  = unique([pt, pu], <span class="string">'rows'</span>);
+p  = processPartition(G, p);
+p = mergeBlocks(p, G, rock.poro, iT, NL);
+p = refineBlocks(p, G, iT, NU, @refineGreedy2);
+p = mergeBlocks(p, G, rock.poro, iT, NL);
+subplot(1,4,2)
+plotCellData(G, iT), outlineCoarseGrid(G,p);
+axis <span class="string">tight</span> <span class="string">off</span>, title(sprintf(<span class="string">'Hybrid TOF:\n%d blocks'</span>, max(p)));
+
+pv = segmentIndicator(G, iV, 10);
+p = mergeBlocks(pv, G, rock.poro, iT, NL);
+p = refineBlocks(p, G, iT, NU, @refineGreedy2);
+p = mergeBlocks(p, G, rock.poro, iT, NL);
+subplot(1,4,3)
+plotCellData(G, iV), outlineCoarseGrid(G,p);
+axis <span class="string">tight</span> <span class="string">off</span>, title(sprintf(<span class="string">'Vel:\n%d blocks'</span>, max(p)));
+
+ps = partitionUI(G, [6 22 1]);
+[b,j,p]  = unique([pv, ps], <span class="string">'rows'</span>);
+p  = processPartition(G, p);
+p = mergeBlocks(p, G, rock.poro, iV, NL);
+p = refineBlocks(p, G, iV, NU, @refineGreedy3);
+p = mergeBlocks(p, G, rock.poro, iV, NL, <span class="string">'static_partition'</span>, ps);
+subplot(1,4,4)
+plotCellData(G, iV), outlineCoarseGrid(G,p);
+axis <span class="string">tight</span> <span class="string">off</span>, title(sprintf(<span class="string">'Hybrid vel:\n%d blocks'</span>, max(p)));
+</pre><img vspace="5" hspace="5" src="example5_04.png" alt=""> <p>Comparing the two time-of-flight grids, we see that the hybrid approach ensures that the blocks are more regular in regions of low flow. Comparing the hybrid time-of-flight and the hybrid velocity grid, we see that the latter has regular coarse blocks in all zones of low flow because of the static 6x22 partition.</p><p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Example 5: Hybrid Grids
+% In this example we discuss how to combine flow adaption with a regular
+% partition, which can be done in several ways.
+%
+% *References:*
+%
+% # V. L. Hauge, K.-A. Lie, J. R. Natvig,
+%   Grid coarsening based on amalgamation for multi-fidelity transport
+%   solvers, September 2010,
+%   http://www.sintef.no/Projectweb/GeoScale/Publications/
+
+
+%% Set up and solve flow problem
+% As our example, we consider a standard five spot with heterogeneity
+% sampled from Model 2 of the 10th SPE Comparative Solution Project.
+try
+   require spe10
+catch me
+   mrstModule add spe10;
+end
+
+try
+   require gridtools
+catch me
+   mrstModule add gridtools;
+end
+
+try
+   require coarsegrid
+catch me
+   mrstModule add coarsegrid;
+end
+
+[G, W, rock] = SPE10_setup(25);
+rock.poro = max(rock.poro, 1e-4);
+fluid = initSingleFluid('mu', 1*centi*poise, 'rho', 1014*kilogram/meter^3);
+rS = initState(G, W, 0);
+S  = computeMimeticIP(G, rock);
+rS = solveIncompFlow(rS, G, S, fluid, 'wells', W);
+
+%%
+% Compute flow indicators based on velocity and time-of-flight
+iK = log10(rock.perm(:,1)); iK = iK - min(iK) + 1;
+v  = faceFlux2cellVelocity(G, rS.flux); v  = sqrt(sum(v .^ 2, 2));
+iV = log10(v); iV = iV - min(iV) + 1;
+T  = computeTimeOfFlight(rS, G, rock, 'wells', W);
+Tr = computeTimeOfFlight(rS, G, rock, 'wells', W, 'reverse', true);
+iT = -log10(T.*Tr); iT = iT - min(iT) + 1;
+
+%% Combine a Uniform and a Flow-Based Partition
+% As our first example of a hybrid grid we will combine a uniform partition
+% with a segmentation based on velocities. The two partitions are generated
+% independently and then merged using the builtin 'unique' function (which
+% may be expensive for very large grids). Afterwards, we process the
+% partition to check for disconnected blocks that need to be split.
+clf
+p1 = segmentIndicator(G, iV, 4);
+pS = partitionUI(G, [3,6,1]);
+[b, i, p] = unique([pS, p1], 'rows'); %#ok<*ASGLU>
+p  = processPartition(G, p);
+subplot(1,3,1), title('Segmented')
+plotCellData(G,iV), outlineCoarseGrid(G,p1); axis equal tight off
+subplot(1,3,2), title('Static')
+plotCellData(G,iV), outlineCoarseGrid(G,pS); axis equal tight off
+subplot(1,3,3), title('Combined')
+plotCellData(G,iV), outlineCoarseGrid(G,p); axis equal tight off
+
+%%
+% If the _a priori_ partitioning should be preserved throughout
+% the coarsening, we specify it in the option |'static_partition'| in the
+% call to |mergeBlocks|. Then the interfaces in this partitioning will not
+% be crossed.
+p1 = mergeBlocks(p, G, iV, iV, 30);
+p2 = mergeBlocks(p, G, iV, iV, 30, 'static_partition', pS);
+
+%%
+% We then plot the result to confirm that the uniform partition is
+% preserved in |p2|.
+clf;
+subplot(1,2,1);
+plotCellData(G, iV);
+h1 = outlineCoarseGrid(G, p1); axis equal tight off;
+title('Without preserved partitioning');
+
+subplot(1,2,2);
+plotCellData(G, iV);
+outlineCoarseGrid(G, pS,'EdgeColor',[.8 .8 .8],'LineWidth',4);
+h2 = outlineCoarseGrid(G, p2); axis equal tight off;
+title('With preserved static partitioning');
+
+%%
+% Both partitions would typically be used as input to further refinement
+% and merging steps. If not, we should get grid of all blocks that are
+% confined within another block.
+delete([h1, h2])
+subplot(1,2,1),
+[blks, p1] = findConfinedBlocks(G,p1);
+outlineCoarseGrid(G, p1);
+
+subplot(1,2,2),
+[blks, p2] = findConfinedBlocks(G,p2);
+outlineCoarseGrid(G, p2);
+
+%% Compare Uniform, NUC, and Hybrid Grids
+% In the next example, we compare three different algorithms
+%
+% * the standard NUC algorithm with time-of-flight and velocity indicator
+% * the combination of a Cartesian partition with a NUC partition based
+% upon the time-of-flight indicator
+% * the combination of a static coarse Cartesian partition and a NUC
+% partition based upon the velocity indicator
+%
+% The parameters in the methods are chose so that the number of coarse
+% blocks should be somewhat lower than the 528 blocks in a 12 x 44 uniform
+% Cartesian partition.
+clf
+cgDims = [12 44 1];
+NB = prod(bsxfun(@rdivide, G.cartDims, cgDims));
+NL = .5*NB;
+NU = 1.1*NB;
+
+pu = partitionUI(G, cgDims);
+pt = segmentIndicator(G, iT, 12);
+p = mergeBlocks(pt, G, rock.poro, iT, NL);
+p = refineBlocks(p, G, iT, NU, @refineGreedy2);
+p = mergeBlocks(p, G, rock.poro, iT, NL);
+subplot(1,4,1)
+plotCellData(G, iT), outlineCoarseGrid(G,p);
+axis tight off, title(sprintf('TOF:\n%d blocks', max(p)));
+
+[b,j,p]  = unique([pt, pu], 'rows');
+p  = processPartition(G, p);
+p = mergeBlocks(p, G, rock.poro, iT, NL);
+p = refineBlocks(p, G, iT, NU, @refineGreedy2);
+p = mergeBlocks(p, G, rock.poro, iT, NL);
+subplot(1,4,2)
+plotCellData(G, iT), outlineCoarseGrid(G,p);
+axis tight off, title(sprintf('Hybrid TOF:\n%d blocks', max(p)));
+
+pv = segmentIndicator(G, iV, 10);
+p = mergeBlocks(pv, G, rock.poro, iT, NL);
+p = refineBlocks(p, G, iT, NU, @refineGreedy2);
+p = mergeBlocks(p, G, rock.poro, iT, NL);
+subplot(1,4,3)
+plotCellData(G, iV), outlineCoarseGrid(G,p);
+axis tight off, title(sprintf('Vel:\n%d blocks', max(p)));
+
+ps = partitionUI(G, [6 22 1]);
+[b,j,p]  = unique([pv, ps], 'rows');
+p  = processPartition(G, p);
+p = mergeBlocks(p, G, rock.poro, iV, NL);
+p = refineBlocks(p, G, iV, NU, @refineGreedy3);
+p = mergeBlocks(p, G, rock.poro, iV, NL, 'static_partition', ps);
+subplot(1,4,4)
+plotCellData(G, iV), outlineCoarseGrid(G,p);
+axis tight off, title(sprintf('Hybrid vel:\n%d blocks', max(p)));
+
+%%
+% Comparing the two time-of-flight grids, we see that the hybrid approach
+% ensures that the blocks are more regular in regions of low flow.
+% Comparing the hybrid time-of-flight and the hybrid velocity grid, we see
+% that the latter has regular coarse blocks in all zones of low flow
+% because of the static 6x22 partition.
+
+##### SOURCE END #####
+--></body></html>

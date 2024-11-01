@@ -1,0 +1,274 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Example 3: Upscaling</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="example3.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Example 3: Upscaling</h1><!--introduction--><p>In this example we illustrate how allocation factors for well pairs can be used to assess the quality of upscaling.  As our example, we consider a subsample of Model 2 from the 10th SPE Comparative Solution Project, but with a different well pattern consisting of two central injectors and producers at each of the four corners.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Set up fine-scale problem</a></li><li><a href="#2">Solve flow problem and compute flow diagnostics</a></li><li><a href="#3">Upscale petrophysical data</a></li><li><a href="#4">Setup the coarse-scale problem</a></li><li><a href="#5">Solve coarse-scale flow problem and compute flow diagnostics</a></li><li><a href="#6">Compare allocation factors</a></li></ul></div><h2>Set up fine-scale problem<a name="1"></a></h2><pre class="codeinput">mrstModule <span class="string">add</span> <span class="string">spe10</span> <span class="string">coarsegrid</span>
+fprintf(1,<span class="string">'Setting up fine-scale problem ...'</span>);
+cartDims = [  60,  220, 15];
+physDims = [1200, 2200, 2*cartDims(end)] .* ft();   <span class="comment">% ft -&gt; m</span>
+<span class="keyword">if</span> ~readCache({cartDims}, <span class="string">'verbose'</span>, false),
+   rock = SPE10_rock(1:cartDims(end));
+   rock.perm = convertFrom(rock.perm, milli*darcy);
+   rock.poro = max(rock.poro, 1e-4);
+   G  = cartGrid(cartDims, physDims);
+   G  = computeGeometry(G);
+   writeCache({cartDims}, {<span class="string">'G'</span>, <span class="string">'rock'</span>});
+<span class="keyword">end</span>
+wtype    = {<span class="string">'bhp'</span>, <span class="string">'bhp'</span>, <span class="string">'bhp'</span>, <span class="string">'bhp'</span>, <span class="string">'bhp'</span>, <span class="string">'bhp'</span>};
+wtarget  = [200,   200,   200,   200,   500,   500  ] .* barsa();
+wrad     = [0.125, 0.125, 0.125, 0.125, 0.125, 0.125] .* meter;
+wloc     = [  1,   60,     1,   60,  20, 40;
+              1,    1,   220,  220, 130, 90];
+wname    = {<span class="string">'P1'</span>, <span class="string">'P2'</span>, <span class="string">'P3'</span>, <span class="string">'P4'</span>, <span class="string">'I1'</span>, <span class="string">'I2'</span>};
+W = [];
+<span class="keyword">for</span> w = 1 : numel(wtype),
+   W = verticalWell(W, G, rock, wloc(1,w), wloc(2,w), 1 : cartDims(end), <span class="keyword">...</span>
+                    <span class="string">'Type'</span>, wtype{w}, <span class="string">'Val'</span>, wtarget(w), <span class="keyword">...</span>
+                    <span class="string">'Radius'</span>, wrad(w), <span class="string">'Name'</span>, wname{w});
+<span class="keyword">end</span>
+fluid = initSingleFluid(<span class="string">'mu'</span>, 1*centi*poise, <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+fprintf(1,<span class="string">'done\n'</span>);
+</pre><pre class="codeoutput">Setting up fine-scale problem ...done
+</pre><h2>Solve flow problem and compute flow diagnostics<a name="2"></a></h2><pre class="codeinput">fprintf(1,<span class="string">'Solving fine-scale problem ...'</span>);
+mrstModule(<span class="string">'add'</span>, fullfile(ROOTDIR, <span class="string">'mex'</span>, <span class="string">'AGMG'</span>))
+rS = initState(G, W, 0);
+T  = computeTrans(G, rock);
+rS = incompTPFA(rS, G, T, fluid, <span class="string">'wells'</span>, W);
+D  = computeTOFandTracer(rS, G, rock, <span class="string">'wells'</span>, W);
+WP = computeWellPairs(rS, G, rock, W, D);
+fprintf(1,<span class="string">'done\n'</span>);
+</pre><pre class="codeoutput">Solving fine-scale problem .../home/moyner/simmatlab/branches/mrst-releases/2012b/mex/AGMG: No such module or directory!
+done
+</pre><h2>Upscale petrophysical data<a name="3"></a></h2><p>Upscale the permeability using either simple harmonic averaging, which we expect will give quite poor results, or a standard flow-based method from the 'upscaling' module, which is expected to give reasonable results. Notice that the computational cost of the flow-based method may be quite high for large subsets of the SPE10 model. For the porosity, we use a simple average.</p><pre class="codeinput">flowbased = true;
+fprintf(1,<span class="string">'Upscaling ...'</span>);
+cfac = [5 5 3];
+p  = partitionUI(G, cartDims./cfac);
+<span class="keyword">if</span> flowbased
+   mrstModule <span class="string">add</span> <span class="string">upscaling</span> <span class="string">agglom</span> <span class="string">coarsegrid</span>
+   CG = generateCoarseGrid(G, p);
+   crock.perm = upscalePerm(G, CG, rock, <span class="string">'Verbose'</span>,true);
+<span class="keyword">else</span>
+   <span class="keyword">for</span> i=1:3;
+      K = accumarray(p,1./rock.perm(:,i))./accumarray(p,1);
+      crock.perm(:,i) = 1./K;
+   <span class="keyword">end</span>
+<span class="keyword">end</span>
+crock.poro = accumarray(p, rock.poro)./accumarray(p,1);
+fprintf(1,<span class="string">'done\n'</span>);
+</pre><pre class="codeoutput">Upscaling ...Computing upscaled permeabilities... Elapsed time is 64.974835 seconds.
+done
+</pre><h2>Setup the coarse-scale problem<a name="4"></a></h2><pre class="codeinput">fprintf(1,<span class="string">'Setting up coarse-scale problem ...'</span>);
+Gc  = cartGrid(cartDims./cfac, physDims);
+Gc  = computeGeometry(Gc);
+cwloc(1,:) = ceil(wloc(1,:)/cfac(1));
+cwloc(2,:) = ceil(wloc(2,:)/cfac(2));
+Wc = [];
+<span class="keyword">for</span> w = 1 : numel(wtype),
+   Wc = verticalWell(Wc, Gc, crock, cwloc(1,w), cwloc(2,w), <span class="keyword">...</span>
+                     1 : (cartDims(end)/cfac(end)), <span class="keyword">...</span>
+                    <span class="string">'Type'</span>, wtype{w}, <span class="string">'Val'</span>, wtarget(w), <span class="keyword">...</span>
+                    <span class="string">'Radius'</span>, wrad(w), <span class="string">'Name'</span>, wname{w});
+<span class="keyword">end</span>
+fprintf(1,<span class="string">'done\n'</span>);
+</pre><pre class="codeoutput">Setting up coarse-scale problem ...done
+</pre><h2>Solve coarse-scale flow problem and compute flow diagnostics<a name="5"></a></h2><pre class="codeinput">fprintf(1,<span class="string">'Solving coarse-scale problem ...'</span>);
+rSc = initState(Gc, Wc, 0);
+Tc  = computeTrans(Gc, crock);
+rSc = incompTPFA(rSc, Gc, Tc, fluid, <span class="string">'wells'</span>, Wc);
+Dc  = computeTOFandTracer(rSc, Gc, crock, <span class="string">'wells'</span>, Wc);
+WPc = computeWellPairs(rSc, Gc, crock, Wc, Dc);
+fprintf(1,<span class="string">'done\n'</span>);
+</pre><pre class="codeoutput">Solving coarse-scale problem ...done
+</pre><h2>Compare allocation factors<a name="6"></a></h2><p>We contrast the allocation factors for the injection wells computed on the fine and the coarse model. Ideally, bars on the negative axis that represent the allocation factors for the coarse model should be the mirror of the bars on the positive axis that represent the allocation factors for the fine model. To simplify the comparison, the fine-scale allocation factors are indicated by lines on top of those of the coarse scale.</p><pre class="codeinput">figure;
+<span class="keyword">for</span> i=1:numel(D.inj)
+   subplot(1,2,i)
+   barh(WP.inj(i).z, cumsum(WP.inj(i).alloc,1),<span class="string">'stacked'</span>);
+   lh=legend(W(D.prod).name,4);
+   hold <span class="string">on</span>
+   barh(WPc.inj(i).z, -cumsum(WPc.inj(i).alloc,1), <span class="string">'stacked'</span>);
+   plot(-cumsum(cumsum(WP.inj(i).alloc,1),2), WP.inj(i).z, <span class="string">'+-k'</span>);
+   hold <span class="string">off</span>, axis <span class="string">tight</span>
+   set(lh,<span class="string">'units'</span>,<span class="string">'pixels'</span>); lp = get(lh,<span class="string">'OuterPosition'</span>);
+   set(lh, <span class="string">'FontSize'</span>,6, <span class="string">'OuterPosition'</span>,[lp(1:2)+[lp(3)-60 0] 60 60]);
+   title(W(D.inj(i)).name);
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="example3_01.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Example 3: Upscaling
+% In this example we illustrate how allocation factors for well pairs can
+% be used to assess the quality of upscaling.  As our example, we consider
+% a subsample of Model 2 from the 10th SPE Comparative Solution Project,
+% but with a different well pattern consisting of two central injectors and
+% producers at each of the four corners.
+
+%% Set up fine-scale problem
+mrstModule add spe10 coarsegrid
+fprintf(1,'Setting up fine-scale problem ...');
+cartDims = [  60,  220, 15];
+physDims = [1200, 2200, 2*cartDims(end)] .* ft();   % ft -> m
+if ~readCache({cartDims}, 'verbose', false),
+   rock = SPE10_rock(1:cartDims(end));
+   rock.perm = convertFrom(rock.perm, milli*darcy);
+   rock.poro = max(rock.poro, 1e-4);
+   G  = cartGrid(cartDims, physDims);
+   G  = computeGeometry(G);
+   writeCache({cartDims}, {'G', 'rock'});
+end
+wtype    = {'bhp', 'bhp', 'bhp', 'bhp', 'bhp', 'bhp'};
+wtarget  = [200,   200,   200,   200,   500,   500  ] .* barsa();
+wrad     = [0.125, 0.125, 0.125, 0.125, 0.125, 0.125] .* meter;
+wloc     = [  1,   60,     1,   60,  20, 40;
+              1,    1,   220,  220, 130, 90];
+wname    = {'P1', 'P2', 'P3', 'P4', 'I1', 'I2'};
+W = [];
+for w = 1 : numel(wtype),
+   W = verticalWell(W, G, rock, wloc(1,w), wloc(2,w), 1 : cartDims(end), ...
+                    'Type', wtype{w}, 'Val', wtarget(w), ...
+                    'Radius', wrad(w), 'Name', wname{w});
+end
+fluid = initSingleFluid('mu', 1*centi*poise, 'rho', 1014*kilogram/meter^3);
+fprintf(1,'done\n');
+
+%% Solve flow problem and compute flow diagnostics
+fprintf(1,'Solving fine-scale problem ...');
+mrstModule('add', fullfile(ROOTDIR, 'mex', 'AGMG'))
+rS = initState(G, W, 0);
+T  = computeTrans(G, rock);
+rS = incompTPFA(rS, G, T, fluid, 'wells', W);
+D  = computeTOFandTracer(rS, G, rock, 'wells', W);
+WP = computeWellPairs(rS, G, rock, W, D);
+fprintf(1,'done\n');
+
+%% Upscale petrophysical data
+% Upscale the permeability using either simple harmonic averaging, which we
+% expect will give quite poor results, or a standard flow-based method from
+% the 'upscaling' module, which is expected to give reasonable results.
+% Notice that the computational cost of the flow-based method may be quite
+% high for large subsets of the SPE10 model. For the porosity, we use a
+% simple average.
+flowbased = true;
+fprintf(1,'Upscaling ...');
+cfac = [5 5 3];
+p  = partitionUI(G, cartDims./cfac);
+if flowbased
+   mrstModule add upscaling agglom coarsegrid
+   CG = generateCoarseGrid(G, p);
+   crock.perm = upscalePerm(G, CG, rock, 'Verbose',true);
+else
+   for i=1:3;
+      K = accumarray(p,1./rock.perm(:,i))./accumarray(p,1);
+      crock.perm(:,i) = 1./K;
+   end
+end
+crock.poro = accumarray(p, rock.poro)./accumarray(p,1);
+fprintf(1,'done\n');
+
+%% Setup the coarse-scale problem
+fprintf(1,'Setting up coarse-scale problem ...');
+Gc  = cartGrid(cartDims./cfac, physDims);
+Gc  = computeGeometry(Gc);
+cwloc(1,:) = ceil(wloc(1,:)/cfac(1));
+cwloc(2,:) = ceil(wloc(2,:)/cfac(2));
+Wc = [];
+for w = 1 : numel(wtype),
+   Wc = verticalWell(Wc, Gc, crock, cwloc(1,w), cwloc(2,w), ...
+                     1 : (cartDims(end)/cfac(end)), ...
+                    'Type', wtype{w}, 'Val', wtarget(w), ...
+                    'Radius', wrad(w), 'Name', wname{w});
+end
+fprintf(1,'done\n');
+
+%% Solve coarse-scale flow problem and compute flow diagnostics
+fprintf(1,'Solving coarse-scale problem ...');
+rSc = initState(Gc, Wc, 0);
+Tc  = computeTrans(Gc, crock);
+rSc = incompTPFA(rSc, Gc, Tc, fluid, 'wells', Wc);
+Dc  = computeTOFandTracer(rSc, Gc, crock, 'wells', Wc);
+WPc = computeWellPairs(rSc, Gc, crock, Wc, Dc);
+fprintf(1,'done\n');
+
+%% Compare allocation factors
+% We contrast the allocation factors for the injection wells computed on
+% the fine and the coarse model. Ideally, bars on the negative axis that
+% represent the allocation factors for the coarse model should be the
+% mirror of the bars on the positive axis that represent the allocation
+% factors for the fine model. To simplify the comparison, the fine-scale
+% allocation factors are indicated by lines on top of those of the coarse
+% scale.
+figure;
+for i=1:numel(D.inj)
+   subplot(1,2,i)
+   barh(WP.inj(i).z, cumsum(WP.inj(i).alloc,1),'stacked');
+   lh=legend(W(D.prod).name,4);
+   hold on
+   barh(WPc.inj(i).z, -cumsum(WPc.inj(i).alloc,1), 'stacked'); 
+   plot(-cumsum(cumsum(WP.inj(i).alloc,1),2), WP.inj(i).z, '+-k');
+   hold off, axis tight
+   set(lh,'units','pixels'); lp = get(lh,'OuterPosition');
+   set(lh, 'FontSize',6, 'OuterPosition',[lp(1:2)+[lp(3)-60 0] 60 60]);
+   title(W(D.inj(i)).name);
+end
+
+##### SOURCE END #####
+--></body></html>

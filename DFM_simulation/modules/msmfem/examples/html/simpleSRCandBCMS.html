@@ -1,0 +1,257 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>simpleSRCandBCMS</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleSRCandBCMS.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Multiscale: Sources and Boundary Conditions</a></li><li><a href="#2">Define and visualize the model</a></li><li><a href="#5">Partition the grid</a></li><li><a href="#6">Construct linear systems</a></li><li><a href="#7">Solve the global flow problems</a></li><li><a href="#8">Plot solution</a></li></ul></div><h2>Multiscale: Sources and Boundary Conditions<a name="1"></a></h2><p>Compare the fine-grid and the multiscale pressure solver by solving the single-phase pressure equation</p><p><img src="simpleSRCandBCMS_eq82190.png" alt="$$\nabla\cdot v = q, \qquad&#xA;   v=\textbf{--}\frac{K}{\mu} \bigl[\nabla p+\rho g\nabla z\bigr],$$"></p><p>for a Cartesian grid with lognormal, layered, isotropic permeability. This example is built upon the <a href="simpleBCMS.html">"Basic Multiscale Tutorial"</a> and the flow-solver tutorial <a href="simpleSRCandBC.html">"How to Specify Sources and Boundary Conditions"</a>.</p><pre class="codeinput">require <span class="string">coarsegrid</span>
+</pre><h2>Define and visualize the model<a name="2"></a></h2><p>We construct the Cartesian grid, set a lognormal, layered, isotropic permeability with given mean, and use the default single-phase fluid with unit viscosity</p><pre class="codeinput">nx = 20; ny = 20; nz = 20;
+Nx =  5; Ny =  5;
+G         = cartGrid([nx ny nz]);
+G         = computeGeometry(G);
+[K, L]    = logNormLayers([nx, ny, nz], 100*rand([10, 1]));
+rock.perm = convertFrom(K, milli*darcy);
+fluid     = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+
+gravity <span class="string">reset</span> <span class="string">on</span>
+
+<span class="comment">% To check that the model is correct, we plot it</span>
+subplot(2,2,1)
+   plotGrid(G,<span class="string">'FaceColor'</span>, <span class="string">'none'</span>);
+   title(<span class="string">'Grid model'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span> <span class="string">off</span>
+
+subplot(2,2,[2 4])
+   plotCellData(G,log10(rock.perm(:,1)) ); shading <span class="string">faceted</span>;
+   title(<span class="string">'Log_{10} of x-permeability [mD]'</span>);
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span> <span class="string">off</span>
+   h = colorbar(<span class="string">'horiz'</span>); dCorr = log10(darcy() / 1000);
+   cs = round(caxis - dCorr); cs = cs(1) : cs(2);
+   set(h, <span class="string">'XTick'</span>, cs+dCorr, <span class="string">'XTickLabel'</span>, num2str(10.^cs'));
+</pre><img vspace="5" hspace="5" src="simpleSRCandBCMS_01.png" alt=""> <p>Model vertical well as a column of cell sources, each with rate equal 1 m^3/day.</p><pre class="codeinput">c   = (nx/2*ny+nx/2 : nx*ny : nx*ny*nz) .';
+src = addSource([], c, ones(size(c)) ./ day());
+subplot(2,2,1); plotGrid(G, c, <span class="string">'FaceColor'</span>, <span class="string">'r'</span>);
+title(<span class="string">'Source cells'</span>);
+</pre><img vspace="5" hspace="5" src="simpleSRCandBCMS_02.png" alt=""> <p>Set boundary conditions: a Dirichlet boundary condition of p=10 bar at the global left-hand side of the model</p><pre class="codeinput">bc = pside([], G, <span class="string">'LEFT'</span>, 10*barsa());
+subplot(2,2,1); plotFaces(G, bc.face, <span class="string">'b'</span>);
+title(<span class="string">'Boundary conditions and source cells'</span>);
+</pre><img vspace="5" hspace="5" src="simpleSRCandBCMS_03.png" alt=""> <h2>Partition the grid<a name="5"></a></h2><p>We partition the fine grid into coarse blocks, ensuring that the coarse blocks do not cross the layers in our model (given by the vector L).</p><pre class="codeinput">p = partitionLayers(G, [Nx, Ny], L);
+p = processPartition(G, p);
+
+subplot(2,2,3);
+   plotCellData(G,mod(p,2)); shading <span class="string">faceted</span>
+   outlineCoarseGrid(G,p,<span class="string">'LineWidth'</span>,3);
+   view(3); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+   title(<span class="string">'Partition of grid'</span>);
+</pre><img vspace="5" hspace="5" src="simpleSRCandBCMS_04.png" alt=""> <h2>Construct linear systems<a name="6"></a></h2><p>We build the grid structure for the coarse grid and construct the fine and the coarse system</p><pre class="codeinput">CG = generateCoarseGrid(G, p);
+S  = computeMimeticIP(G, rock);
+CS = generateCoarseSystem(G, rock, S, CG, ones([G.cells.num, 1]), <span class="keyword">...</span>
+                          <span class="string">'bc'</span>, bc, <span class="string">'src'</span>, src);
+</pre><h2>Solve the global flow problems<a name="7"></a></h2><pre class="codeinput">xRef = solveIncompFlow  (initResSol(G, 0.0), G, S, fluid, <span class="keyword">...</span>
+                         <span class="string">'src'</span>, src, <span class="string">'bc'</span>, bc);
+xMs  = solveIncompFlowMS(initResSol(G, 0.0), G, CG, p, S, CS, fluid,  <span class="keyword">...</span>
+                         <span class="string">'src'</span>, src, <span class="string">'bc'</span>, bc);
+</pre><h2>Plot solution<a name="8"></a></h2><pre class="codeinput">clf,
+cellNo  = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+plot_var  = @(x) plotCellData(G, x);
+plot_pres = @(x) plot_var(convertTo(x.pressure(1:G.cells.num), barsa()));
+plot_flux = @(x) plot_var(log10(accumarray(cellNo, <span class="keyword">...</span>
+   abs(convertTo(faceFlux2cellFlux(G, x.flux), meter^3/day)))));
+
+subplot(<span class="string">'Position'</span>,[0.02 0.52 0.46 0.42]),
+   plot_pres(xRef); title(<span class="string">'pressure, fine [bar]'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+   cax = caxis; colorbar
+
+subplot(<span class="string">'Position'</span>,[0.52 0.52 0.46 0.42]),
+   plot_pres(xMs); title(<span class="string">'pressure, ms [bar]'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+   caxis(cax); colorbar
+
+subplot(<span class="string">'Position'</span>,[0.02 0.02 0.46 0.42]),
+   plot_flux(xRef); title(<span class="string">'log(flux intensity), fine'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+   cax2 = caxis; colorbar
+
+subplot(<span class="string">'Position'</span>,[0.52 0.02 0.46 0.42]),
+   plot_flux(xMs); title(<span class="string">'Log(flux intensity), ms'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+   caxis(cax2); colorbar
+</pre><img vspace="5" hspace="5" src="simpleSRCandBCMS_05.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Multiscale: Sources and Boundary Conditions
+% Compare the fine-grid and the multiscale pressure solver by solving the
+% single-phase pressure equation
+%
+% $$\nabla\cdot v = q, \qquad
+%    v=\textbf{REPLACE_WITH_DASH_DASH}\frac{K}{\mu} \bigl[\nabla p+\rho g\nabla z\bigr],$$
+%
+% for a Cartesian grid with lognormal, layered, isotropic permeability.
+% This example is built upon the <simpleBCMS.html "Basic Multiscale
+% Tutorial"> and the flow-solver tutorial <simpleSRCandBC.html "How to
+% Specify Sources and Boundary Conditions">.
+require coarsegrid
+
+%% Define and visualize the model
+% We construct the Cartesian grid, set a lognormal, layered, isotropic
+% permeability with given mean, and use the default single-phase fluid with
+% unit viscosity
+nx = 20; ny = 20; nz = 20;
+Nx =  5; Ny =  5;
+G         = cartGrid([nx ny nz]);
+G         = computeGeometry(G);
+[K, L]    = logNormLayers([nx, ny, nz], 100*rand([10, 1]));
+rock.perm = convertFrom(K, milli*darcy);
+fluid     = initSingleFluid('mu' ,    1*centi*poise     , ...
+                            'rho', 1014*kilogram/meter^3);
+
+gravity reset on
+
+% To check that the model is correct, we plot it
+subplot(2,2,1)
+   plotGrid(G,'FaceColor', 'none');
+   title('Grid model')
+   view(3), camproj perspective, axis tight equal off
+
+subplot(2,2,[2 4])
+   plotCellData(G,log10(rock.perm(:,1)) ); shading faceted;
+   title('Log_{10} of x-permeability [mD]');
+   view(3), camproj perspective, axis tight equal off
+   h = colorbar('horiz'); dCorr = log10(darcy() / 1000);
+   cs = round(caxis - dCorr); cs = cs(1) : cs(2);
+   set(h, 'XTick', cs+dCorr, 'XTickLabel', num2str(10.^cs'));
+
+%%
+% Model vertical well as a column of cell sources, each with rate equal 1
+% m^3/day.
+c   = (nx/2*ny+nx/2 : nx*ny : nx*ny*nz) .';
+src = addSource([], c, ones(size(c)) ./ day());
+subplot(2,2,1); plotGrid(G, c, 'FaceColor', 'r');
+title('Source cells');
+
+%%
+% Set boundary conditions: a Dirichlet boundary condition of
+% p=10 bar at the global left-hand side of the model
+bc = pside([], G, 'LEFT', 10*barsa());
+subplot(2,2,1); plotFaces(G, bc.face, 'b');
+title('Boundary conditions and source cells');
+
+%% Partition the grid
+% We partition the fine grid into coarse blocks, ensuring that the coarse
+% blocks do not cross the layers in our model (given by the vector L).
+p = partitionLayers(G, [Nx, Ny], L);
+p = processPartition(G, p);
+
+subplot(2,2,3);
+   plotCellData(G,mod(p,2)); shading faceted
+   outlineCoarseGrid(G,p,'LineWidth',3);
+   view(3); axis equal tight off
+   title('Partition of grid');
+
+%% Construct linear systems
+% We build the grid structure for the coarse grid and construct the fine and
+% the coarse system
+CG = generateCoarseGrid(G, p);
+S  = computeMimeticIP(G, rock);
+CS = generateCoarseSystem(G, rock, S, CG, ones([G.cells.num, 1]), ...
+                          'bc', bc, 'src', src);
+
+%% Solve the global flow problems
+xRef = solveIncompFlow  (initResSol(G, 0.0), G, S, fluid, ...
+                         'src', src, 'bc', bc);
+xMs  = solveIncompFlowMS(initResSol(G, 0.0), G, CG, p, S, CS, fluid,  ...
+                         'src', src, 'bc', bc);
+
+%% Plot solution
+clf,
+cellNo  = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+plot_var  = @(x) plotCellData(G, x);
+plot_pres = @(x) plot_var(convertTo(x.pressure(1:G.cells.num), barsa()));
+plot_flux = @(x) plot_var(log10(accumarray(cellNo, ...
+   abs(convertTo(faceFlux2cellFlux(G, x.flux), meter^3/day)))));
+
+subplot('Position',[0.02 0.52 0.46 0.42]),
+   plot_pres(xRef); title('pressure, fine [bar]')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+   cax = caxis; colorbar
+
+subplot('Position',[0.52 0.52 0.46 0.42]),
+   plot_pres(xMs); title('pressure, ms [bar]')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+   caxis(cax); colorbar
+
+subplot('Position',[0.02 0.02 0.46 0.42]),
+   plot_flux(xRef); title('log(flux intensity), fine')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+   cax2 = caxis; colorbar
+
+subplot('Position',[0.52 0.02 0.46 0.42]),
+   plot_flux(xMs); title('Log(flux intensity), ms')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+   caxis(cax2); colorbar
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>

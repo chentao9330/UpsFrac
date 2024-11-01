@@ -1,0 +1,311 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>periodicUpscaleExample</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="periodicUpscaleExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Relative permeability upscaling example</a></li><li><a href="#2">Set up a simple grid with periodic boundaries</a></li><li><a href="#3">Extract a small subset of SPE10 to upscale.</a></li><li><a href="#4">Do a single periodic upscale</a></li><li><a href="#5">Load a two phase fluid for upscaling</a></li><li><a href="#6">Upscale relative permeability (viscous limit)</a></li><li><a href="#7">Plot the results for both limits</a></li><li><a href="#8">Set up a relative permeability upscaling run</a></li><li><a href="#9">Plot the resulting relative permeability</a></li></ul></div><h2>Relative permeability upscaling example<a name="1"></a></h2><p>This example demostrates upscaling of relative permeability on periodic grids. The example upscales a single block sampled from SPE10 using first permeability and then finds relative permeability based on viscous limit and various saturation values.</p><pre class="codeinput">require <span class="string">spe10</span>
+</pre><h2>Set up a simple grid with periodic boundaries<a name="2"></a></h2><p>Right -&gt; Left Front -&gt; Back Bottom -&gt; Top</p><pre class="codeinput">G   = cartGrid([5 5 2]);
+G   = computeGeometry(G);
+
+bcr{1}=pside([],G,<span class="string">'RIGHT'</span>,0);
+bcr{2}=pside([],G,<span class="string">'FRONT'</span>,0);
+bcr{3}=pside([],G,<span class="string">'BOTTOM'</span>,0);
+
+bcl{1}=pside([],G,<span class="string">'LEFT'</span>,0);
+bcl{2}=pside([],G,<span class="string">'BACK'</span>,0);
+bcl{3}=pside([],G,<span class="string">'TOP'</span>,0);
+
+dp = {0, 0, 0};
+
+<span class="comment">% Make periodic grid. We retain the regular grid for plotting, as plotGrid</span>
+<span class="comment">% uses the boundary faces to plot grids: A fully periodic grid has, per</span>
+<span class="comment">% definition, no boundary faces.</span>
+
+[Gp, bcp]=makePeriodicGridMulti3d(G, bcl, bcr, dp);
+</pre><h2>Extract a small subset of SPE10 to upscale.<a name="3"></a></h2><pre class="codeinput">x = 51; y = 11; z = 1;
+
+rock = SPE10_rock(x:(x-1+G.cartDims(1)),<span class="keyword">...</span>
+                  y:(y-1+G.cartDims(2)),<span class="keyword">...</span>
+                  z:(z-1+G.cartDims(3)));
+clf
+plotCellData(G, log10(rock.perm(:,1)));
+title(<span class="string">'Fine scale permeability'</span>)
+</pre><img vspace="5" hspace="5" src="periodicUpscaleExample_01.png" alt=""> <h2>Do a single periodic upscale<a name="4"></a></h2><p>We upscale the permeability using two point flux approximation for the pressure solver</p><pre class="codeinput">psolver = @(state, Grid, Fluid, BCP, Rock)<span class="keyword">...</span>
+           incompTPFA(state, Grid, computeTransGp(G, Grid, Rock),<span class="keyword">...</span>
+           Fluid, <span class="string">'bcp'</span>, BCP);
+
+<span class="comment">% L is the size of the domain</span>
+L = max(G.faces.centroids) - min(G.faces.centroids);
+<span class="comment">% To find permeability we use a unitary fluid so that the mobility/relperm</span>
+<span class="comment">% is equal to the saturation which is equal to one, removing any fluid</span>
+<span class="comment">% specific effects.</span>
+
+fluid_pure = initSingleFluid(<span class="string">'mu'</span>,1,<span class="string">'rho'</span>,1);
+
+warning(<span class="string">'off'</span>, <span class="string">'mrst:periodic_bc'</span>)
+perm2 = upscalePermeabilityPeriodic(Gp, bcp, 1, psolver, fluid_pure, rock, L);
+warning(<span class="string">'on'</span>, <span class="string">'mrst:periodic_bc'</span>)
+</pre><h2>Load a two phase fluid for upscaling<a name="5"></a></h2><p>The data are synthetic and should not be used for anything but testing. rocklist contains a list of included property files in a simple format tabulated on water saturation.</p><pre class="codeinput">current_dir = fileparts(mfilename(<span class="string">'fullpath'</span>));
+fn    = fullfile(current_dir, <span class="string">'rocklist.txt'</span>);
+
+T  = readTabulatedJFluidFile(fn);
+
+<span class="comment">% Print the tabulated values from the first and only file</span>
+fprintf(<span class="string">' Sw         |Krw         |Kro         |J-func\n'</span>)
+fprintf(<span class="string">'--------------------------------------------------\n'</span>)
+fprintf(<span class="string">'%+1.4e |%+1.4e |%+1.4e |%+1.4e\n'</span>, T{1})
+
+fluid = initSWOFFluidJfunc(<span class="string">'mu'</span> , [   10,  100] .* centi*poise     , <span class="keyword">...</span>
+                             <span class="string">'rho'</span>, [1000, 600] .* kilogram/meter^3, <span class="keyword">...</span>
+                             <span class="string">'table'</span>, T, <span class="keyword">...</span>
+                             <span class="string">'satnum'</span>, 1, <span class="string">'jfunc'</span>, true, <span class="string">'rock'</span>, rock, <span class="keyword">...</span>
+                             <span class="string">'surf_tens'</span>, 10*dyne/(centi*meter));
+</pre><pre class="codeoutput"> Sw         |Krw         |Kro         |J-func
+--------------------------------------------------
++1.6380e-01 |+2.0870e-01 |+2.4530e-01 |+2.7820e-01
++3.0570e-01 |+3.4470e-01 |+4.4600e-01 |+4.8450e-01
++5.1050e-01 |+5.5230e-01 |+5.9430e-01 |+6.2280e-01
++6.5200e-01 |+7.2460e-01 |+7.6780e-01 |+8.2710e-01
++8.5990e-01 |+8.9540e-01 |+9.2560e-01 |+9.5610e-01
++9.9720e-01 |+0.0000e+00 |+1.7000e-02 |+1.7500e-02
++1.8300e-02 |+1.9000e-02 |+2.0400e-02 |+2.8300e-02
++3.3900e-02 |+3.6000e-02 |+4.1100e-02 |+4.5600e-02
++5.2200e-02 |+5.9400e-02 |+1.0710e-01 |+1.6320e-01
++3.2400e-01 |+4.7220e-01 |+6.3920e-01 |+7.6180e-01
++8.5000e-01 |+8.8560e-01 |+1.0510e+00 |+9.6900e-01
++8.1380e-01 |+6.6210e-01 |+5.3770e-01 |+4.2750e-01
++2.6110e-01 |+2.0970e-01 |+1.8090e-01 |+1.2850e-01
++9.1200e-02 |+7.1900e-02 |+5.7800e-02 |+3.3800e-02
++2.6600e-02 |+2.1200e-02 |+1.9000e-02 |+1.7400e-02
++1.7100e-02 |+1.7000e-02 |+0.0000e+00 |+2.3538e+00
++2.2030e-01 |+1.1690e-01 |+8.8500e-02 |+7.6600e-02
++6.4200e-02 |+4.2000e-03 |-3.0800e-02 |-3.6800e-02
+-5.0000e-02 |-6.0900e-02 |-6.7800e-02 |-7.5700e-02
+-9.5600e-02 |-1.0690e-01 |-1.2990e-01 |-1.6020e-01
+-2.4550e-01 |-3.2290e-01 |-4.6560e-01 |-1.4570e+00
+Using rock.perm(:,1) for j-scaling
+</pre><h2>Upscale relative permeability (viscous limit)<a name="6"></a></h2><p>We assume zero capillary forces and upscale using the viscous and capillary limit.</p><pre class="codeinput">[saturations_visc, kr_visc] = upscaleRelpermLimit(G, rock, fluid, <span class="string">'type'</span>, <span class="string">'fixed'</span>, <span class="string">'limit'</span>, <span class="string">'viscous'</span>);
+[saturations_cap, kr_cap]   = upscaleRelpermLimit(G, rock, fluid, <span class="string">'type'</span>, <span class="string">'fixed'</span>, <span class="string">'limit'</span>, <span class="string">'capillary'</span>);
+</pre><h2>Plot the results for both limits<a name="7"></a></h2><p>The viscous limit is equal in all directions, while the capillary is not.</p><pre class="codeinput">clf;
+ph = {<span class="string">'water'</span>, <span class="string">'oil'</span>};
+<span class="keyword">for</span> i = 1:2
+    subplot(2,1,i)
+    hold <span class="string">on</span>
+    plot(saturations_visc, kr_visc{i});
+    plot(saturations_cap, kr_cap{i}, <span class="string">'--.'</span>);
+    title([<span class="string">'Relative permeability (Viscous/capillary limit), '</span> ph{i} <span class="string">' phase'</span>]);
+    xlabel(<span class="string">'Saturation'</span>)
+    legend({<span class="string">'x (viscous)'</span>, <span class="string">'y (viscous)'</span>, <span class="string">'z (viscous)'</span><span class="keyword">...</span>
+            <span class="string">'x (capillary)'</span>, <span class="string">'y (capillary)'</span>, <span class="string">'z (capillary)'</span>}, <span class="string">'location'</span>, <span class="string">'West'</span>)
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="periodicUpscaleExample_02.png" alt=""> <h2>Set up a relative permeability upscaling run<a name="8"></a></h2><p>Saturations from 0:1 with resolution of ~20 data points.</p><pre class="codeinput">saturations = 0:0.05:1;
+<span class="comment">% Pressure drop over periodic boundary used to induce flow.</span>
+dp_scale=1e-3;
+
+<span class="comment">% Ignore warnings from the implicit sovler as the solution is driven to</span>
+<span class="comment">% steady state. It is natural that some steps fail during this process.</span>
+warning(<span class="string">'off'</span>, <span class="string">'implicitTransport:failure'</span>)
+[sat_vec, kr, perm, krK] = upscaleRelperm(G, rock, fluid, dp_scale, saturations, <span class="string">'periodic'</span>, false);
+warning(<span class="string">'on'</span>, <span class="string">'implicitTransport:failure'</span>)
+</pre><pre class="codeoutput">implicitTransport: FAILED due to timestep 0.296242 &lt; 1.18497.
+implicitTransport: FAILED due to timestep 18.9595 &lt; 37.919.
+implicitTransport: FAILED due to timestep 9.47975 &lt; 18.9595.
+</pre><h2>Plot the resulting relative permeability<a name="9"></a></h2><p>This is tabulated by water saturation in both cases As the default option is to use a pressure drop in x-direction, the x-values are significantly different from the y/z values which are similar, but not equal.</p><pre class="codeinput"><span class="keyword">for</span> i = 1:2
+subplot(2,1,i)
+plot(sat_vec, kr{i});
+title([<span class="string">'Relative permeability, phase '</span> num2str(i)]);
+xlabel(<span class="string">'Water saturation'</span>)
+legend({<span class="string">'x'</span>, <span class="string">'y'</span>, <span class="string">'z'</span>}, <span class="string">'location'</span>, <span class="string">'West'</span>)
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="periodicUpscaleExample_03.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Relative permeability upscaling example
+% This example demostrates upscaling of relative permeability on periodic
+% grids. The example upscales a single block sampled from SPE10 using first
+% permeability and then finds relative permeability based on viscous limit
+% and various saturation values.
+require spe10
+
+%% Set up a simple grid with periodic boundaries
+% Right -> Left
+% Front -> Back
+% Bottom -> Top
+
+G   = cartGrid([5 5 2]);
+G   = computeGeometry(G);
+
+bcr{1}=pside([],G,'RIGHT',0);
+bcr{2}=pside([],G,'FRONT',0);
+bcr{3}=pside([],G,'BOTTOM',0);
+
+bcl{1}=pside([],G,'LEFT',0);
+bcl{2}=pside([],G,'BACK',0);
+bcl{3}=pside([],G,'TOP',0);
+
+dp = {0, 0, 0};
+
+% Make periodic grid. We retain the regular grid for plotting, as plotGrid
+% uses the boundary faces to plot grids: A fully periodic grid has, per
+% definition, no boundary faces.
+
+[Gp, bcp]=makePeriodicGridMulti3d(G, bcl, bcr, dp);
+%% Extract a small subset of SPE10 to upscale.
+
+x = 51; y = 11; z = 1;
+
+rock = SPE10_rock(x:(x-1+G.cartDims(1)),...
+                  y:(y-1+G.cartDims(2)),...
+                  z:(z-1+G.cartDims(3)));
+clf
+plotCellData(G, log10(rock.perm(:,1)));
+title('Fine scale permeability')
+
+%% Do a single periodic upscale
+% We upscale the permeability using two point flux approximation for the
+% pressure solver
+psolver = @(state, Grid, Fluid, BCP, Rock)...
+           incompTPFA(state, Grid, computeTransGp(G, Grid, Rock),...
+           Fluid, 'bcp', BCP);
+
+% L is the size of the domain
+L = max(G.faces.centroids) - min(G.faces.centroids);
+% To find permeability we use a unitary fluid so that the mobility/relperm
+% is equal to the saturation which is equal to one, removing any fluid
+% specific effects.
+
+fluid_pure = initSingleFluid('mu',1,'rho',1);
+
+warning('off', 'mrst:periodic_bc')
+perm2 = upscalePermeabilityPeriodic(Gp, bcp, 1, psolver, fluid_pure, rock, L);
+warning('on', 'mrst:periodic_bc')
+
+%% Load a two phase fluid for upscaling
+% The data are synthetic and should not be used for anything but testing.
+% rocklist contains a list of included property files in a simple format
+% tabulated on water saturation.
+
+current_dir = fileparts(mfilename('fullpath'));
+fn    = fullfile(current_dir, 'rocklist.txt');
+
+T  = readTabulatedJFluidFile(fn);
+
+% Print the tabulated values from the first and only file
+fprintf(' Sw         |Krw         |Kro         |J-func\n')
+fprintf('REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH\n')
+fprintf('%+1.4e |%+1.4e |%+1.4e |%+1.4e\n', T{1})
+
+fluid = initSWOFFluidJfunc('mu' , [   10,  100] .* centi*poise     , ...
+                             'rho', [1000, 600] .* kilogram/meter^3, ...
+                             'table', T, ...
+                             'satnum', 1, 'jfunc', true, 'rock', rock, ...
+                             'surf_tens', 10*dyne/(centi*meter));
+                         
+%% Upscale relative permeability (viscous limit)
+% We assume zero capillary forces and upscale using the viscous and capillary limit. 
+[saturations_visc, kr_visc] = upscaleRelpermLimit(G, rock, fluid, 'type', 'fixed', 'limit', 'viscous');
+[saturations_cap, kr_cap]   = upscaleRelpermLimit(G, rock, fluid, 'type', 'fixed', 'limit', 'capillary');
+
+%% Plot the results for both limits
+% The viscous limit is equal in all directions, while the capillary is not.
+clf;
+ph = {'water', 'oil'};
+for i = 1:2
+    subplot(2,1,i)
+    hold on
+    plot(saturations_visc, kr_visc{i});
+    plot(saturations_cap, kr_cap{i}, 'REPLACE_WITH_DASH_DASH.');
+    title(['Relative permeability (Viscous/capillary limit), ' ph{i} ' phase']);
+    xlabel('Saturation')
+    legend({'x (viscous)', 'y (viscous)', 'z (viscous)'...
+            'x (capillary)', 'y (capillary)', 'z (capillary)'}, 'location', 'West')
+end
+
+%% Set up a relative permeability upscaling run
+% Saturations from 0:1 with resolution of ~20 data points.
+saturations = 0:0.05:1;
+% Pressure drop over periodic boundary used to induce flow.
+dp_scale=1e-3;
+
+% Ignore warnings from the implicit sovler as the solution is driven to
+% steady state. It is natural that some steps fail during this process.
+warning('off', 'implicitTransport:failure')
+[sat_vec, kr, perm, krK] = upscaleRelperm(G, rock, fluid, dp_scale, saturations, 'periodic', false);
+warning('on', 'implicitTransport:failure')
+
+%% Plot the resulting relative permeability
+% This is tabulated by water saturation in both cases
+% As the default option is to use a pressure drop in x-direction, the
+% x-values are significantly different from the y/z values which are
+% similar, but not equal.
+
+for i = 1:2
+subplot(2,1,i)
+plot(sat_vec, kr{i});
+title(['Relative permeability, phase ' num2str(i)]);
+xlabel('Water saturation')
+legend({'x', 'y', 'z'}, 'location', 'West')
+end
+
+
+##### SOURCE END #####
+--></body></html>

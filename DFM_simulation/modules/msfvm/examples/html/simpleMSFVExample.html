@@ -1,0 +1,421 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Multiscale Finite Volume Pressure Solver</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleMSFVExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Multiscale Finite Volume Pressure Solver</h1><!--introduction--><p>This example compares the multiscale finite volume method with a fine scale solution for a simple case of single phase incompressible flow with wells and boundary conditions on a Cartesian grid.</p><p>The Multiscale Finite Volume Method (MsFVM) is a multiscale method where instead of solving a full discretization for all fine cells, a series of smaller, local problems are solved with unit pressure to give a coarse pressure system. The resulting coarse pressure is then used to scale the local problems to find a fine scale pressure approximation.</p><p>The method is attractive because pressure updates are inexpensive once the pressure basis functions have been constructed and because it guarantees a conservative flow field if an additional set of basis functions are created.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Load the modules required for the example</a></li><li><a href="#2">We define a simple 2D Cartesian grid</a></li><li><a href="#3">Generate dual grid from the coarse grid using a logical algorithm</a></li><li><a href="#4">Set up permeability and fluid</a></li><li><a href="#5">Add a simple Dirichlet boundary</a></li><li><a href="#6">Add wells</a></li><li><a href="#7">Solve the systems.</a></li><li><a href="#8">Plot reference solution</a></li><li><a href="#9">Plot the multiscale solution</a></li><li><a href="#10">Plot error</a></li><li><a href="#11">Decompose the solution</a></li><li><a href="#12">Plot the basis solution</a></li><li><a href="#13">Plot the correction functions</a></li><li><a href="#14">Plot streamlines for the reference</a></li><li><a href="#15">Plot streamlines for the multiscale solution</a></li><li><a href="#16">Plot streamlines without the reconstructed flux</a></li></ul></div><h2>Load the modules required for the example<a name="1"></a></h2><p>We will use streamlines and coarse grids.</p><pre class="codeinput">mrstModule <span class="string">add</span> <span class="string">coarsegrid</span> <span class="string">streamlines</span> <span class="string">msfvm</span>
+</pre><h2>We define a simple 2D Cartesian grid<a name="2"></a></h2><p>The fine scale grid will consist of <img src="simpleMSFVExample_eq26263.png" alt="$50\times50$"> fine cells, with a coarse grid of <img src="simpleMSFVExample_eq71161.png" alt="$3\times3$"> coarse blocks.</p><pre class="codeinput">nx = 50; ny = 50;
+
+Nx = 3; Ny = 3;
+
+<span class="comment">% Instansiate the fine grid</span>
+G = cartGrid([nx, ny]);
+G = computeGeometry(G);
+
+<span class="comment">% Generate coarse grid</span>
+p = partitionUI(G, [Nx, Ny]);
+CG = generateCoarseGrid(G, p);
+CG = coarsenGeometry(CG);
+</pre><h2>Generate dual grid from the coarse grid using a logical algorithm<a name="3"></a></h2><p>The dual grid is based on the coarse grid and has corners defined by the coarse centroids of the coarse grid. Here our grid is Cartesian which makes it easy to define a dual grid based on the logical indices.</p><p>We also visualize the dual grid. Cells corresponding to primal coarse centers are drawn in green, edge cells are drawn in orange and the primal coarse grid is drawn in red. Note that while the coarse grid is face centered, the dual coarse grid is cell centered, giving overlap between edges.</p><pre class="codeinput">DG = partitionUIdual(CG, [Nx, Ny]);
+
+
+clf;
+plotDual(G, DG)
+outlineCoarseGrid(G,p, <span class="string">'red'</span>)
+view(0,90), axis <span class="string">tight</span>
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_01.png" alt=""> <h2>Set up permeability and fluid<a name="4"></a></h2><p>We create a fluid object for one phase flow. The permeability is generated via a porosity distribution, which is then visualized.</p><pre class="codeinput">fluid        = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                                <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+<span class="comment">% Permeability</span>
+poro = gaussianField(G.cartDims, [.4 .8], [11 3 3], 2.5);
+K = poro.^3.*(1e-5)^2./(0.81*72*(1-poro).^2);
+rock.perm    = K(:);
+
+<span class="comment">% Plot log10 of permeability</span>
+clf;
+plotCellData(G, log10(rock.perm));
+axis <span class="string">tight</span> <span class="string">off</span>;
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_02.png" alt=""> <h2>Add a simple Dirichlet boundary<a name="5"></a></h2><p>Add a simple flow boundary condition based on pressure. This gives flow everywhere.</p><pre class="codeinput">bc = [];
+bc = pside   (bc, G, <span class="string">'LEFT'</span> , 1*barsa());
+bc = pside   (bc, G, <span class="string">'RIGHT'</span>, 0);
+</pre><h2>Add wells<a name="6"></a></h2><p>We are adding a producer / injector pair of wells to demonstrate their effect on the solver.</p><pre class="codeinput">W = [];
+cell1 = 13 + ny*13;
+cell2 = 37 + ny*37;
+
+
+W = addWell(W, G, rock, cell1,      <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>, .0*barsa(), <span class="keyword">...</span>
+            <span class="string">'Radius'</span>, 0.1, <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="keyword">...</span>
+            <span class="string">'Comp_i'</span>, [0, 1]);
+
+W = addWell(W, G, rock, cell2,      <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>, 1*barsa(), <span class="keyword">...</span>
+            <span class="string">'Radius'</span>, 0.1, <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="keyword">...</span>
+            <span class="string">'Comp_i'</span>, [0, 1]);
+</pre><h2>Solve the systems.<a name="7"></a></h2><p>First we initiate a pressure system. This structure is always required, but without transport only the grid is relevant.</p><p>We also compute transmissibilities. The MS solver is based on the TPFA solver, and as such has many of the same arguments. Multiscale methods in general can be seen as approximations to a specific discretization, and will inherit any strengths and weaknesses from the parent method, for instance grid orientation effects.</p><p>The system is then solved three times: Once with a full TPFA solver, once with the multiscale sovler with conservative flow and lastly using the multiscale solver without conservative flow.</p><pre class="codeinput">sol = initState(G, [], 0, [1, 0]);
+
+T = computeTrans(G, rock);
+
+<span class="comment">% Solve TPFA reference solution.</span>
+solRef = incompTPFA(sol, G, T, fluid, <span class="string">'wells'</span>, W, <span class="string">'bc'</span>, bc);
+
+<span class="comment">% Solve multiscale pressure. Reconstruct conservative flow using flow basis</span>
+<span class="comment">% functions.</span>
+solMSFV = solveMSFV_TPFA_Incomp(sol, G, CG, T, fluid,<span class="keyword">...</span>
+                                <span class="string">'Wells'</span>, W,<span class="keyword">...</span>
+                                <span class="string">'bc'</span>, bc,<span class="keyword">...</span>
+                                <span class="string">'Dual'</span>, DG,<span class="keyword">...</span>
+                                <span class="string">'Reconstruct'</span>, true,<span class="keyword">...</span>
+                                <span class="string">'Verbose'</span>, false);
+
+solMSFV2 = solveMSFV_TPFA_Incomp(sol, G, CG, T, fluid,<span class="keyword">...</span>
+                                <span class="string">'Wells'</span>, W,<span class="keyword">...</span>
+                                <span class="string">'bc'</span>, bc,<span class="keyword">...</span>
+                                <span class="string">'Dual'</span>, DG,<span class="keyword">...</span>
+                                <span class="string">'Reconstruct'</span>, false,<span class="keyword">...</span>
+                                <span class="string">'Verbose'</span>, false);
+</pre><h2>Plot reference solution<a name="8"></a></h2><pre class="codeinput">clf;
+plotCellData(G, solRef.pressure);
+axis <span class="string">tight</span> <span class="string">off</span>; colorbar;
+set(gca, <span class="string">'CLim'</span>, [0, max(solRef.pressure)]);
+title(<span class="string">'TPFA'</span>)
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_03.png" alt=""> <h2>Plot the multiscale solution<a name="9"></a></h2><pre class="codeinput">clf;
+plotCellData(G, solMSFV.pressure);
+axis <span class="string">tight</span> <span class="string">off</span>; colorbar;
+title(<span class="string">'MsFVM'</span>)
+<span class="comment">% Use same axis scaling for the multiscale solution as the TPFA solution</span>
+set(gca, <span class="string">'CLim'</span>, [0, max(solRef.pressure)]);
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_04.png" alt=""> <h2>Plot error<a name="10"></a></h2><p>Plot error scaled with local variation</p><pre class="codeinput">reportError(solRef.pressure, solMSFV.pressure);
+clf;
+plotCellData(G, abs(solRef.pressure - solMSFV.pressure) ./ <span class="keyword">...</span>
+                abs(max(solRef.pressure - min(solRef.pressure))));
+axis <span class="string">tight</span> <span class="string">off</span>; colorbar;
+</pre><pre class="codeoutput">ERROR:
+	2: 0.03167324
+	Sup: 0.08558124
+	Minimum 0.00036582
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_05.png" alt=""> <h2>Decompose the solution<a name="11"></a></h2><p>We observe that the error is large near the wells. This is not a coincidence: The MsFV solves bases its initial pressure solution of a coarse system, which does not actually include wells other than in a integral sense. We can decompose the solution to see this:</p><pre class="codeinput"><span class="comment">% Find the pressure basis</span>
+p_basis = solMSFV.msfvm.B*solMSFV.pressurecoarse;
+p_corr = solMSFV.msfvm.Cr;
+P = solMSFV.P';
+<span class="comment">% We need to permute this back to the original grid ordering using the</span>
+<span class="comment">% permutation matrix...</span>
+p_basis = P*p_basis;
+p_corr  = P*p_corr;
+</pre><h2>Plot the basis solution<a name="12"></a></h2><p>Note that the pressure has become low where the wells are! This happens because the system simultanously tries to create correct flux over the edges of the coarse grid as if the wells were there, but tries to find a pressure solution where the wells are not actually included. This leads to low pressure. However, a set of correction functions are constructed, which add inn fine scale behavior of the wells as well as boundary conditions:</p><pre class="codeinput">clf;
+plotCellData(G, p_basis)
+title(<span class="string">'Basis pressure'</span>);
+outlineCoarseGrid(G,p, <span class="string">'red'</span>)
+plotDual(G, DG)
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_06.png" alt=""> <h2>Plot the correction functions<a name="13"></a></h2><p>The actual pressure is the sum of these two solutions. Note that when applied as an iterative method, the correction functions also contain non-local effects, i.e. source terms trying to minimze the residual.</p><pre class="codeinput">clf;
+plotCellData(G, p_corr)
+title(<span class="string">'Correction pressure'</span>)
+outlineCoarseGrid(G,p, <span class="string">'red'</span>)
+plotDual(G, DG)
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_07.png" alt=""> <h2>Plot streamlines for the reference<a name="14"></a></h2><pre class="codeinput">[i j] = ind2sub(G.cartDims, 1:G.cells.num);
+<span class="comment">% Start a streamline at all the boundaries, as well as in each well.</span>
+startpts = find(i == max(i) | i == min(i) | j == min(j) | j == max(j));
+startpts = [startpts'; vertcat(W.cells)];
+
+<span class="comment">% Once a flux is plotted, reverse the flux to get more streamlines.</span>
+clf;
+streamline(pollock(G, solRef, startpts));
+tmp.flux = -solRef.flux;
+streamline(pollock(G, tmp, startpts));
+title(<span class="string">'TPFA'</span>)
+axis <span class="string">tight</span>
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_08.png" alt=""> <h2>Plot streamlines for the multiscale solution<a name="15"></a></h2><pre class="codeinput">clf;
+streamline(pollock(G, solMSFV, startpts));
+tmp.flux = -solMSFV.flux;
+streamline(pollock(G, tmp, startpts));
+title(<span class="string">'MsFVM'</span>)
+axis <span class="string">tight</span>
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_09.png" alt=""> <h2>Plot streamlines without the reconstructed flux<a name="16"></a></h2><p>Note that the reconstructed flux is much closer to the reference.</p><pre class="codeinput">clf;
+streamline(pollock(G, solMSFV2, startpts));
+tmp.flux = -solMSFV2.flux;
+streamline(pollock(G, tmp, startpts));
+title(<span class="string">'MsFVM (No flux reconstruction)'</span>)
+axis <span class="string">tight</span>
+</pre><img vspace="5" hspace="5" src="simpleMSFVExample_10.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Multiscale Finite Volume Pressure Solver
+% This example compares the multiscale finite volume method with a fine scale
+% solution for a simple case of single phase incompressible flow with wells
+% and boundary conditions on a Cartesian grid.
+%
+% The Multiscale Finite Volume Method (MsFVM) is a multiscale method where
+% instead of solving a full discretization for all fine cells, a series of
+% smaller, local problems are solved with unit pressure to give a coarse
+% pressure system. The resulting coarse pressure is then used to scale the
+% local problems to find a fine scale pressure approximation.
+%
+% The method is attractive because pressure updates are inexpensive once
+% the pressure basis functions have been constructed and because it
+% guarantees a conservative flow field if an additional set of basis
+% functions are created.
+
+%% Load the modules required for the example
+% We will use streamlines and coarse grids.
+mrstModule add coarsegrid streamlines msfvm
+%% We define a simple 2D Cartesian grid
+% The fine scale grid will consist of $50\times50$ fine cells, with a
+% coarse grid of $3\times3$ coarse blocks.
+nx = 50; ny = 50;
+
+Nx = 3; Ny = 3;
+
+% Instansiate the fine grid
+G = cartGrid([nx, ny]);
+G = computeGeometry(G);
+
+% Generate coarse grid
+p = partitionUI(G, [Nx, Ny]);
+CG = generateCoarseGrid(G, p);
+CG = coarsenGeometry(CG);
+%% Generate dual grid from the coarse grid using a logical algorithm
+% The dual grid is based on the coarse grid and has corners defined by the
+% coarse centroids of the coarse grid. Here our grid is Cartesian which
+% makes it easy to define a dual grid based on the logical indices.
+%
+% We also visualize the dual grid. Cells corresponding to primal coarse
+% centers are drawn in green, edge cells are drawn in orange and the primal
+% coarse grid is drawn in red. Note that while the coarse grid is face
+% centered, the dual coarse grid is cell centered, giving overlap between
+% edges.
+%
+DG = partitionUIdual(CG, [Nx, Ny]);
+
+
+clf;
+plotDual(G, DG)
+outlineCoarseGrid(G,p, 'red')
+view(0,90), axis tight
+%% Set up permeability and fluid
+% We create a fluid object for one phase flow. The permeability is
+% generated via a porosity distribution, which is then visualized.
+
+fluid        = initSingleFluid('mu' ,    1*centi*poise     , ...
+                                'rho', 1014*kilogram/meter^3);
+% Permeability
+poro = gaussianField(G.cartDims, [.4 .8], [11 3 3], 2.5);
+K = poro.^3.*(1e-5)^2./(0.81*72*(1-poro).^2);
+rock.perm    = K(:);
+
+% Plot log10 of permeability
+clf;
+plotCellData(G, log10(rock.perm));
+axis tight off;
+%% Add a simple Dirichlet boundary
+% Add a simple flow boundary condition based on pressure. This gives flow
+% everywhere.
+bc = [];
+bc = pside   (bc, G, 'LEFT' , 1*barsa());
+bc = pside   (bc, G, 'RIGHT', 0);
+%% Add wells
+% We are adding a producer / injector pair of wells to demonstrate their
+% effect on the solver.
+W = [];
+cell1 = 13 + ny*13;
+cell2 = 37 + ny*37;
+
+
+W = addWell(W, G, rock, cell1,      ...
+            'Type', 'bhp' , 'Val', .0*barsa(), ...
+            'Radius', 0.1, 'InnerProduct', 'ip_tpf', ...
+            'Comp_i', [0, 1]);
+
+W = addWell(W, G, rock, cell2,      ...
+            'Type', 'bhp' , 'Val', 1*barsa(), ...
+            'Radius', 0.1, 'InnerProduct', 'ip_tpf', ...
+            'Comp_i', [0, 1]);
+        
+%% Solve the systems.
+% First we initiate a pressure system. This structure is always required,
+% but without transport only the grid is relevant.
+%
+% We also compute transmissibilities. The MS solver is based on the TPFA
+% solver, and as such has many of the same arguments. Multiscale methods in
+% general can be seen as approximations to a specific discretization, and
+% will inherit any strengths and weaknesses from the parent method, for
+% instance grid orientation effects.
+%
+% The system is then solved three times: Once with a full TPFA solver, once
+% with the multiscale sovler with conservative flow and lastly using the
+% multiscale solver without conservative flow.
+
+sol = initState(G, [], 0, [1, 0]);
+
+T = computeTrans(G, rock);
+
+% Solve TPFA reference solution.
+solRef = incompTPFA(sol, G, T, fluid, 'wells', W, 'bc', bc);
+
+% Solve multiscale pressure. Reconstruct conservative flow using flow basis
+% functions.
+solMSFV = solveMSFV_TPFA_Incomp(sol, G, CG, T, fluid,...
+                                'Wells', W,...
+                                'bc', bc,... 
+                                'Dual', DG,...
+                                'Reconstruct', true,...
+                                'Verbose', false);
+
+solMSFV2 = solveMSFV_TPFA_Incomp(sol, G, CG, T, fluid,...
+                                'Wells', W,...
+                                'bc', bc,... 
+                                'Dual', DG,...
+                                'Reconstruct', false,...
+                                'Verbose', false);
+%% Plot reference solution
+clf;
+plotCellData(G, solRef.pressure);
+axis tight off; colorbar;
+set(gca, 'CLim', [0, max(solRef.pressure)]);
+title('TPFA')
+
+%% Plot the multiscale solution
+clf;
+plotCellData(G, solMSFV.pressure);
+axis tight off; colorbar;
+title('MsFVM')
+% Use same axis scaling for the multiscale solution as the TPFA solution
+set(gca, 'CLim', [0, max(solRef.pressure)]);
+%% Plot error
+% Plot error scaled with local variation
+reportError(solRef.pressure, solMSFV.pressure);
+clf;
+plotCellData(G, abs(solRef.pressure - solMSFV.pressure) ./ ...
+                abs(max(solRef.pressure - min(solRef.pressure))));
+axis tight off; colorbar;
+%% Decompose the solution
+% We observe that the error is large near the wells. This is not a
+% coincidence: The MsFV solves bases its initial pressure solution of a
+% coarse system, which does not actually include wells other than in a
+% integral sense. We can decompose the solution to see this:
+
+% Find the pressure basis
+p_basis = solMSFV.msfvm.B*solMSFV.pressurecoarse;
+p_corr = solMSFV.msfvm.Cr;
+P = solMSFV.P';
+% We need to permute this back to the original grid ordering using the
+% permutation matrix...
+p_basis = P*p_basis;
+p_corr  = P*p_corr;
+
+%% Plot the basis solution
+% Note that the pressure has become low where the wells are! This happens
+% because the system simultanously tries to create correct flux over the
+% edges of the coarse grid as if the wells were there, but tries to find a
+% pressure solution where the wells are not actually included. This leads
+% to low pressure. However, a set of correction functions are constructed,
+% which add inn fine scale behavior of the wells as well as boundary
+% conditions:
+
+clf;
+plotCellData(G, p_basis)
+title('Basis pressure');
+outlineCoarseGrid(G,p, 'red')
+plotDual(G, DG)
+
+%% Plot the correction functions
+% The actual pressure is the sum of these two solutions. Note that when
+% applied as an iterative method, the correction functions also contain
+% non-local effects, i.e. source terms trying to minimze the residual.
+
+clf;
+plotCellData(G, p_corr)
+title('Correction pressure')
+outlineCoarseGrid(G,p, 'red')
+plotDual(G, DG)
+
+%% Plot streamlines for the reference
+[i j] = ind2sub(G.cartDims, 1:G.cells.num);
+% Start a streamline at all the boundaries, as well as in each well.
+startpts = find(i == max(i) | i == min(i) | j == min(j) | j == max(j));
+startpts = [startpts'; vertcat(W.cells)];
+
+% Once a flux is plotted, reverse the flux to get more streamlines.
+clf;
+streamline(pollock(G, solRef, startpts));
+tmp.flux = -solRef.flux;
+streamline(pollock(G, tmp, startpts));
+title('TPFA')
+axis tight
+
+%% Plot streamlines for the multiscale solution
+clf;
+streamline(pollock(G, solMSFV, startpts));
+tmp.flux = -solMSFV.flux;
+streamline(pollock(G, tmp, startpts));
+title('MsFVM')
+axis tight
+
+%% Plot streamlines without the reconstructed flux
+% Note that the reconstructed flux is much closer to the reference.
+clf;
+streamline(pollock(G, solMSFV2, startpts));
+tmp.flux = -solMSFV2.flux;
+streamline(pollock(G, tmp, startpts));
+title('MsFVM (No flux reconstruction)')
+axis tight
+
+##### SOURCE END #####
+--></body></html>

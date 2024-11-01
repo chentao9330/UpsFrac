@@ -1,0 +1,175 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>gravityColumnMS</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="gravityColumnMS.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Multiscale Pressure Solver: Simple Case Driven by Gravity</a></li><li><a href="#2">Define the model</a></li><li><a href="#3">Assemble and solve the fine-scale linear system</a></li><li><a href="#4">Plot the fine-scale solution</a></li><li><a href="#5">Multiscale system</a></li><li><a href="#6">Plot the coarse-scale solution</a></li></ul></div><h2>Multiscale Pressure Solver: Simple Case Driven by Gravity<a name="1"></a></h2><p>Compare the fine-scale and the multiscale solver for the single-phase pressure equation</p><p><img src="gravityColumnMS_eq82190.png" alt="$$\nabla\cdot v = q, \qquad&#xA;   v=\textbf{--}\frac{K}{\mu} \bigl[\nabla p+\rho g\nabla z\bigr],$$"></p><p>This example is a direction continuation of <a href="gravityColumn.html">"My First Flow-Solver: Gravity Column"</a> and introduces the multiscale flow solver without going into specific details. More details can be found in the <a href="simpleBCMS.html">"Basic Multiscale Tutorial"</a>.</p><pre class="codeinput">require <span class="string">coarsegrid</span>
+</pre><h2>Define the model<a name="2"></a></h2><p>The domain [0,1]x[0,1]x[0,30] is discretized using a Cartesian grid with homogeneous isotropic permeability of 100 mD. The fluid has density 1000 kg/m^3 and viscosity 1 cP and the pressure is 100 bar at the top of the structure</p><pre class="codeinput">nx = 2; ny = 2; nz = 30;
+Nx = 1; Ny = 1; Nz =  6;
+gravity <span class="string">reset</span> <span class="string">on</span>
+G          = cartGrid([nx, ny, nz], [1, 1, 30]);
+G          = computeGeometry(G);
+rock.perm  = repmat(0.1*darcy(), [G.cells.num, 1]);
+fluid      = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                             <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+
+bc         = pside([], G, <span class="string">'TOP'</span>, 100.*barsa);
+</pre><h2>Assemble and solve the fine-scale linear system<a name="3"></a></h2><pre class="codeinput">S   = computeMimeticIP(G, rock);
+sol = solveIncompFlow(initResSol(G , 0.0), G, S, fluid,<span class="string">'bc'</span>, bc);
+</pre><h2>Plot the fine-scale solution<a name="4"></a></h2><pre class="codeinput">newplot;
+subplot(3, 2, [1 3])
+   plotCellData(G, convertTo(sol.pressure(1:G.cells.num), barsa), <span class="keyword">...</span>
+                <span class="string">'EdgeColor'</span>, <span class="string">'k'</span>);
+   set(gca, <span class="string">'ZDir'</span>, <span class="string">'reverse'</span>), title(<span class="string">'Fine-scale pressure [bar]'</span>)
+   view(45,5), cx = caxis; colorbar
+</pre><img vspace="5" hspace="5" src="gravityColumnMS_01.png" alt=""> <h2>Multiscale system<a name="5"></a></h2><pre class="codeinput">p  = partitionUI(G, [Nx, Ny, Nz]);
+p  = processPartition  (G, p);
+CG = generateCoarseGrid(G, p);
+
+CS = generateCoarseSystem(G, rock, S, CG, ones([G.cells.num, 1]),<span class="string">'bc'</span>, bc);
+xrMs = solveIncompFlowMS (initResSol(G, 0.0), G, CG, p, <span class="keyword">...</span>
+                          S, CS, fluid, <span class="string">'bc'</span>, bc);
+</pre><h2>Plot the coarse-scale solution<a name="6"></a></h2><p>As one clearly can see from the plot, the multiscale solution only captures the gravity effect on the coarse scale. To also capture fine-scale gravity effects, one can either add extra correction functions or insert the multiscale solution into the fine-scale equations and solve for a residual correction</p><pre class="codeinput">subplot(3, 2, [2 4])
+   plotCellData(G, convertTo(xrMs.pressure(1:G.cells.num), barsa), <span class="keyword">...</span>
+                <span class="string">'EdgeColor'</span>, <span class="string">'k'</span>);
+   set(gca, <span class="string">'ZDir'</span>, <span class="string">'reverse'</span>); title(<span class="string">'Coarse-scale pressure [bar]'</span>)
+   view(45,5); caxis(cx); colorbar
+
+subplot(3, 2, [5 6]);
+   plot(1:nz, convertTo(sol .pressure(1:nx*ny:nx*ny*nz), barsa()), <span class="string">'-o'</span>,<span class="keyword">...</span>
+        1:nz, convertTo(xrMs.pressure(1:nx*ny:nx*ny*nz), barsa()), <span class="string">'-*'</span>);
+   legend(<span class="string">'fine'</span>,<span class="string">'coarse'</span>,2);
+</pre><img vspace="5" hspace="5" src="gravityColumnMS_02.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Multiscale Pressure Solver: Simple Case Driven by Gravity
+% Compare the fine-scale and the multiscale solver for the single-phase
+% pressure equation
+%
+% $$\nabla\cdot v = q, \qquad
+%    v=\textbf{REPLACE_WITH_DASH_DASH}\frac{K}{\mu} \bigl[\nabla p+\rho g\nabla z\bigr],$$
+%
+% This example is a direction continuation of <gravityColumn.html "My First
+% Flow-Solver: Gravity Column"> and introduces the multiscale flow solver
+% without going into specific details. More details can be found in the
+% <simpleBCMS.html "Basic Multiscale Tutorial">.
+require coarsegrid
+
+%% Define the model
+% The domain [0,1]x[0,1]x[0,30] is discretized using a Cartesian grid with
+% homogeneous isotropic permeability of 100 mD. The fluid has density 1000
+% kg/m^3 and viscosity 1 cP and the pressure is 100 bar at the top of the
+% structure
+nx = 2; ny = 2; nz = 30;
+Nx = 1; Ny = 1; Nz =  6;
+gravity reset on
+G          = cartGrid([nx, ny, nz], [1, 1, 30]);
+G          = computeGeometry(G);
+rock.perm  = repmat(0.1*darcy(), [G.cells.num, 1]);
+fluid      = initSingleFluid('mu' ,    1*centi*poise     , ...
+                             'rho', 1014*kilogram/meter^3);
+
+bc         = pside([], G, 'TOP', 100.*barsa);
+
+%% Assemble and solve the fine-scale linear system
+S   = computeMimeticIP(G, rock);
+sol = solveIncompFlow(initResSol(G , 0.0), G, S, fluid,'bc', bc);
+
+%% Plot the fine-scale solution
+newplot;
+subplot(3, 2, [1 3])
+   plotCellData(G, convertTo(sol.pressure(1:G.cells.num), barsa), ...
+                'EdgeColor', 'k');
+   set(gca, 'ZDir', 'reverse'), title('Fine-scale pressure [bar]')
+   view(45,5), cx = caxis; colorbar
+
+%% Multiscale system
+p  = partitionUI(G, [Nx, Ny, Nz]);
+p  = processPartition  (G, p);
+CG = generateCoarseGrid(G, p);
+
+CS = generateCoarseSystem(G, rock, S, CG, ones([G.cells.num, 1]),'bc', bc);
+xrMs = solveIncompFlowMS (initResSol(G, 0.0), G, CG, p, ...
+                          S, CS, fluid, 'bc', bc);
+
+%% Plot the coarse-scale solution
+% As one clearly can see from the plot, the multiscale solution only
+% captures the gravity effect on the coarse scale. To also capture
+% fine-scale gravity effects, one can either add extra correction functions
+% or insert the multiscale solution into the fine-scale equations and solve
+% for a residual correction
+subplot(3, 2, [2 4])
+   plotCellData(G, convertTo(xrMs.pressure(1:G.cells.num), barsa), ...
+                'EdgeColor', 'k');
+   set(gca, 'ZDir', 'reverse'); title('Coarse-scale pressure [bar]')
+   view(45,5); caxis(cx); colorbar
+
+subplot(3, 2, [5 6]);
+   plot(1:nz, convertTo(sol .pressure(1:nx*ny:nx*ny*nz), barsa()), '-o',...
+        1:nz, convertTo(xrMs.pressure(1:nx*ny:nx*ny*nz), barsa()), '-*');
+   legend('fine','coarse',2);
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>

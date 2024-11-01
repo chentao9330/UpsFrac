@@ -1,0 +1,149 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Example 1: Basic flow diagnostics</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="example1.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Example 1: Basic flow diagnostics</h1><!--introduction--><p>In this example we will demonstrate how we can use time-of-flight and stationary tracer distribution computed using a standard finite-volume method to derive three different measures for heterogeneity:</p><div><ol><li>flow-capacity/storage-capacity diagram,</li><li>the Lorenz coefficient</li><li>sweep efficiency</li></ol></div><p>Technical description: see Shavali et al. (SPE 146446), Shook and Mitchell (SPE 124625).</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Set up and solve flow problem</a></li><li><a href="#2">Compute and display time-of-flight and tracer partitioning</a></li><li><a href="#4">Compute and display flow-capacity/storage-capacity diagram</a></li><li><a href="#5">Compute the Lorenz coefficient</a></li><li><a href="#6">Compute and display sweep efficiency versus dimensionless time</a></li></ul></div><h2>Set up and solve flow problem<a name="1"></a></h2><p>As our example, we consider a standard five spot with heterogeneity sampled from Model 2 of the 10th SPE Comparative Solution Project.</p><pre class="codeinput">mrstModule <span class="string">add</span> <span class="string">spe10</span>
+[G, W, rock] = SPE10_setup(25);
+rock.poro = max(rock.poro, 1e-4);
+fluid = initSingleFluid(<span class="string">'mu'</span>, 1*centi*poise, <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+rS = initState(G, W, 0);
+S  = computeMimeticIP(G, rock);
+rS = solveIncompFlow(rS, G, S, fluid, <span class="string">'wells'</span>, W);
+</pre><h2>Compute and display time-of-flight and tracer partitioning<a name="2"></a></h2><p>First we compute time-of-flight which is the travel time from an injector to a given point in the reservoir, and stationary distribution of tracers injected continuously from each injetion well. From the latter, we can easily compute the volume flooded by each injector. Reversing the velocity field, we can cmopute the reverse time-of-flight (the travel time from an arbitrary point to the nearest producer) and the drainage volumes of each producer.</p><pre class="codeinput">D = computeTOFandTracer(rS, G, rock, <span class="string">'wells'</span>, W);
+subplot(1,2,1); plotCellData(G,D.ppart); axis <span class="string">equal</span> <span class="string">tight</span>
+subplot(1,2,2); plotCellData(G,log10(sum(D.tof,2))); axis <span class="string">equal</span> <span class="string">tight</span>
+</pre><img vspace="5" hspace="5" src="example1_01.png" alt=""> <p>Threshold the tracer regions using time-of-flight to show the development of flooded regions</p><pre class="codeinput"><span class="keyword">for</span> i=1:4
+   subplot(2,2,i); plotCellData(G,D.ppart, D.tof(:,1)&lt;5*i*year);
+   title([<span class="string">'Flooded after '</span> num2str(i*5) <span class="string">' years'</span>]); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>;
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="example1_02.png" alt=""> <h2>Compute and display flow-capacity/storage-capacity diagram<a name="4"></a></h2><p>Making an analogue to 1D displacement theory, the F-Phi curve is the equivalent to a plot of the fractional flow versus saturation.</p><pre class="codeinput">[F,Phi] = computeFandPhi(G.cells.volumes,D.tof);
+figure, plot(Phi,F,<span class="string">'.'</span>);
+</pre><img vspace="5" hspace="5" src="example1_03.png" alt=""> <h2>Compute the Lorenz coefficient<a name="5"></a></h2><p>The Lorenz coefficient is a popular measure of heterogeneity. It is equal to twice the area under the curve and above the F=Phi line. It varies between 0 (homogeneous displacement) to 1 (infinitely heterogeneous displacement).</p><pre class="codeinput">fprintf(1, <span class="string">'Lorenz coefficient: %f\n'</span>, computeLorenz(F,Phi));
+</pre><pre class="codeoutput">Lorenz coefficient: 0.317024
+</pre><h2>Compute and display sweep efficiency versus dimensionless time<a name="6"></a></h2><p>Analogue: 1D displacement using the F-Phi curve as a flux function</p><pre class="codeinput">[Ev,tD] = computeSweep(F,Phi);
+figure, plot(tD,Ev,<span class="string">'.'</span>);
+</pre><img vspace="5" hspace="5" src="example1_04.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Example 1: Basic flow diagnostics
+% In this example we will demonstrate how we can use time-of-flight and
+% stationary tracer distribution computed using a standard finite-volume
+% method to derive three different measures for heterogeneity:
+%
+% # flow-capacity/storage-capacity diagram,
+% # the Lorenz coefficient
+% # sweep efficiency
+%
+% Technical description: see Shavali et al. (SPE 146446), Shook and
+% Mitchell (SPE 124625).
+
+%% Set up and solve flow problem
+% As our example, we consider a standard five spot with heterogeneity
+% sampled from Model 2 of the 10th SPE Comparative Solution Project.
+mrstModule add spe10
+[G, W, rock] = SPE10_setup(25);
+rock.poro = max(rock.poro, 1e-4);
+fluid = initSingleFluid('mu', 1*centi*poise, 'rho', 1014*kilogram/meter^3);
+rS = initState(G, W, 0);
+S  = computeMimeticIP(G, rock);
+rS = solveIncompFlow(rS, G, S, fluid, 'wells', W);
+
+%% Compute and display time-of-flight and tracer partitioning
+% First we compute time-of-flight which is the travel time from an injector
+% to a given point in the reservoir, and stationary distribution of tracers
+% injected continuously from each injetion well. From the latter, we can
+% easily compute the volume flooded by each injector. Reversing the
+% velocity field, we can cmopute the reverse time-of-flight (the travel
+% time from an arbitrary point to the nearest producer) and the drainage
+% volumes of each producer.
+D = computeTOFandTracer(rS, G, rock, 'wells', W);
+subplot(1,2,1); plotCellData(G,D.ppart); axis equal tight
+subplot(1,2,2); plotCellData(G,log10(sum(D.tof,2))); axis equal tight
+
+%%
+% Threshold the tracer regions using time-of-flight to show the development
+% of flooded regions
+for i=1:4
+   subplot(2,2,i); plotCellData(G,D.ppart, D.tof(:,1)<5*i*year);
+   title(['Flooded after ' num2str(i*5) ' years']); axis equal tight off;
+end
+
+%% Compute and display flow-capacity/storage-capacity diagram
+% Making an analogue to 1D displacement theory, the F-Phi curve is the
+% equivalent to a plot of the fractional flow versus saturation.
+[F,Phi] = computeFandPhi(G.cells.volumes,D.tof);
+figure, plot(Phi,F,'.');
+
+%% Compute the Lorenz coefficient
+% The Lorenz coefficient is a popular measure of heterogeneity. It is equal
+% to twice the area under the curve and above the F=Phi line. It varies
+% between 0 (homogeneous displacement) to 1 (infinitely heterogeneous
+% displacement).
+fprintf(1, 'Lorenz coefficient: %f\n', computeLorenz(F,Phi));
+
+%% Compute and display sweep efficiency versus dimensionless time
+% Analogue: 1D displacement using the F-Phi curve as a flux function
+[Ev,tD] = computeSweep(F,Phi);
+figure, plot(tD,Ev,'.');
+##### SOURCE END #####
+--></body></html>

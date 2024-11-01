@@ -1,0 +1,271 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Using Peacemann Well Models</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleWellExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Using Peacemann Well Models</h1><!--introduction--><p>In this example we will demonstrate how our mimetic flow solver can be equipped with a Peacemann type well model. For a vertical well, the model is on the following form</p><p><img src="simpleWellExample_eq70495.png" alt="$$ q = J (p \textbf{--} p_{bh}), \qquad&#xA;   J=\frac{2\pi K h}{\mu (\ln(r_e/r_w)+s)},\quad&#xA;   r_e = 0.2\sqrt{\Delta x\Delta y} $$"></p><p>where <b>q</b> is the flow rate <b>p_{bh}</b> is the bottom-hole pressure, <b>r_e</b> is the effective (Peacemann) radius, <b>r_w</b> is the radius of the well, <b>K</b> is the permeability, and <b>h</b> the height of the well. Depending upon what is specified, either the bottom-hole pressure <b>p_bh</b> or the flow rate <b>q</b> end up as extra unknowns per completion in the resulting linear system.</p><p>To demonstrate the use of well models, we will (as before) solve the single-phase pressure equation</p><p><img src="simpleWellExample_eq25293.png" alt="$$\nabla\cdot v = q, \qquad v=\textbf{--}\frac{K}{\mu}\nabla p,$$"></p><p>for a Cartesian grid and isotropic, homogeneous permeability. See the <a href="simpleBC.html">basic flow-solver tutorial</a> for more details on the grid structure, the structure used to hold the solutions, etc.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Define grid, rock and fluid data</a></li><li><a href="#2">Initialize and construct linear system</a></li><li><a href="#3">Introduce wells</a></li><li><a href="#7">Solve linear system</a></li><li><a href="#8">Report results</a></li></ul></div><h2>Define grid, rock and fluid data<a name="1"></a></h2><p>Construct a Cartesian grid of size 20-by-20-by-5 cells, where each cell has dimension 1-by-1-by-1. Set permeability equal 100 mD, and use the default single fluid with density 1000 kg/m^3 and viscosity 1 cP.</p><pre class="codeinput">nx = 20; ny = 20; nz = 5;
+G = cartGrid([nx, ny, nz]);
+G = computeGeometry(G, <span class="string">'Verbose'</span>, true);
+rock.perm = repmat(100 .* milli*darcy, [G.cells.num, 1]);
+fluid     = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+</pre><pre class="codeoutput">Computing normals, areas, and centroids...	Elapsed time is 0.006047 seconds.
+Computing cell volumes and centroids...		Elapsed time is 0.160206 seconds.
+</pre><h2>Initialize and construct linear system<a name="2"></a></h2><p>Initialize solution structure with reservoir pressure equal 0. Compute mimetic inner products from input grid and rock properties.</p><pre class="codeinput">S = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Using inner product: 'ip_simple'.
+Computing cell inner products ...		Elapsed time is 0.169333 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.001795 seconds.
+</pre><h2>Introduce wells<a name="3"></a></h2><p>We will include two wells, one rate-controlled vertical well and one horizontal well controlled by bottom-hole pressure. Wells are described using a Peacemann model, giving an extra set of equations that need to be assembled.</p><p>The first well is vertical well (vertical is default):</p><div><ul><li>completion in cells: cellsWell1</li><li>controlled by injection rate = 1.0  [m^3/d]</li><li>radius = 0.1.                       [m]</li></ul></div><pre class="codeinput">cellsWell1 =  1 : nx*ny : nx*ny*nz;
+radius     = .1;
+W = addWell([], G, rock, cellsWell1, <span class="string">'Type'</span>, <span class="string">'rate'</span>, <span class="keyword">...</span>
+            <span class="string">'Val'</span>, 1.0/day(), <span class="string">'Radius'</span>, radius, <span class="string">'name'</span>, <span class="string">'I'</span>);
+disp(<span class="string">'Well #1: '</span>); display(W(1));
+</pre><pre class="codeoutput">Well #1: 
+       cells: [5x1 double]
+        type: 'rate'
+         val: 1.1574e-05
+           r: 0.1000
+         dir: [5x1 char]
+          WI: [5x1 double]
+          dZ: [5x1 double]
+        name: 'I'
+       compi: [1 0 0]
+    refDepth: 0
+        sign: 1
+
+</pre><p>The second well is horizontal in the 'y' direction:</p><div><ul><li>completion in cells: cellsWell2</li><li>controlled by bottom hole pressure, bhp = 1e5 [Pa]</li><li>radius = 0.1                                  [m]</li></ul></div><pre class="codeinput">cellsWell2 = nx : ny : nx*ny;
+W = addWell(W, G, rock, cellsWell2, <span class="string">'Type'</span>, <span class="string">'bhp'</span>, <span class="keyword">...</span>
+            <span class="string">'Val'</span>, 1.0e5, <span class="string">'Radius'</span>, radius, <span class="string">'Dir'</span>, <span class="string">'y'</span>, <span class="string">'name'</span>, <span class="string">'P'</span>);
+disp(<span class="string">'Well #2: '</span>); display(W(2));
+</pre><pre class="codeoutput">Well #2: 
+       cells: [20x1 double]
+        type: 'bhp'
+         val: 100000
+           r: 0.1000
+         dir: [20x1 char]
+          WI: [20x1 double]
+          dZ: [20x1 double]
+        name: 'P'
+       compi: [1 0 0]
+    refDepth: 0
+        sign: []
+
+</pre><p>We plot the wells to check if the wells are placed as we wanted them. (The plot will later be moved to subplot(2,2,1), hence we first find the corresponding axes position before generating the handle graphics).</p><pre class="codeinput">subplot(2,2,1), pos = get(gca,<span class="string">'Position'</span>); clf
+   plotGrid(G, <span class="string">'FaceColor'</span>, <span class="string">'none'</span>);
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+   [ht, htxt, hs] = plotWell(G, W, <span class="string">'radius'</span>, radius, <span class="string">'height'</span>, 2);
+   set(htxt, <span class="string">'FontSize'</span>, 16);
+</pre><img vspace="5" hspace="5" src="simpleWellExample_01.png" alt=""> <p>Once the wells are added, we can generate the components of the linear system corresponding to the two wells and initialize the solution structure (with correct bhp)</p><pre class="codeinput">resSol = initState(G, W, 0);
+display(resSol.wellSol);
+</pre><pre class="codeoutput">1x2 struct array with fields:
+    flux
+    pressure
+
+</pre><h2>Solve linear system<a name="7"></a></h2><p>Solve linear system construced from S and W to obtain solution for flow and pressure in the reservoir and the wells.</p><pre class="codeinput">gravity <span class="string">off</span>
+resSol = solveIncompFlow(resSol, G, S, fluid, <span class="string">'wells'</span>, W);
+</pre><h2>Report results<a name="8"></a></h2><p>We move the plot of the grids and wells to the upper-left subplot. The producer inflow profile is shown in the upper-right and the cell pressures in the lower-left subplot. In the lower-right subplot, we show the flux intensity, which must be constructed by averaging over cell faces (this is what is achieved by 'rldecode' and 'accumarray')</p><pre class="codeinput"><span class="comment">%subplot(2,2,1)</span>
+   set(gca, <span class="string">'Position'</span>, pos);  <span class="comment">% move the current plot</span>
+
+subplot(2,2,2)
+   plot(convertTo(-resSol.wellSol(2).flux, meter^3/day))
+   title(<span class="string">'Producer inflow profile [m^3/d]'</span>);
+
+subplot(2,2,3)
+   plotCellData(G, convertTo(resSol.pressure(1:G.cells.num), barsa));
+   title(<span class="string">'Pressure [bar]'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+
+subplot(2,2,4)
+   cellNo = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+   cf     = accumarray(cellNo, abs(resSol.flux(G.cells.faces(:,1))) );
+   plotCellData(G, convertTo(cf, meter^3/day) );
+   title(<span class="string">'Sqrt of flux intensity [m^3/day]'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+</pre><img vspace="5" hspace="5" src="simpleWellExample_02.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Using Peacemann Well Models
+% 
+% In this example we will demonstrate how our mimetic flow solver can be
+% equipped with a Peacemann type well model. For a vertical well, the model
+% is on the following form
+%
+% $$ q = J (p \textbf{REPLACE_WITH_DASH_DASH} p_{bh}), \qquad 
+%    J=\frac{2\pi K h}{\mu (\ln(r_e/r_w)+s)},\quad
+%    r_e = 0.2\sqrt{\Delta x\Delta y} $$
+%
+% where *q* is the flow rate *p_{bh}* is the bottom-hole pressure, *r_e* is
+% the effective (Peacemann) radius, *r_w* is the radius of the well, *K* is
+% the permeability, and *h* the height of the well. Depending upon what is
+% specified, either the bottom-hole pressure *p_bh* or the flow rate *q*
+% end up as extra unknowns per completion in the resulting linear system.
+%
+% To demonstrate the use of well models, we will (as before) solve the
+% single-phase pressure equation
+%
+% $$\nabla\cdot v = q, \qquad v=\textbf{REPLACE_WITH_DASH_DASH}\frac{K}{\mu}\nabla p,$$
+%
+% for a Cartesian grid and isotropic, homogeneous permeability. See the
+% <simpleBC.html basic flow-solver tutorial> for more details
+% on the grid structure, the structure used to hold the solutions, etc.
+
+%% Define grid, rock and fluid data
+% Construct a Cartesian grid of size 20-by-20-by-5 cells, where each cell
+% has dimension 1-by-1-by-1. Set permeability equal 100 mD, and use the
+% default single fluid with density 1000 kg/m^3 and viscosity 1 cP.
+nx = 20; ny = 20; nz = 5;
+G = cartGrid([nx, ny, nz]);
+G = computeGeometry(G, 'Verbose', true);
+rock.perm = repmat(100 .* milli*darcy, [G.cells.num, 1]);
+fluid     = initSingleFluid('mu' ,    1*centi*poise     , ...
+                            'rho', 1014*kilogram/meter^3);
+
+%% Initialize and construct linear system
+% Initialize solution structure with reservoir pressure equal 0. Compute
+% mimetic inner products from input grid and rock properties.
+S = computeMimeticIP(G, rock, 'Verbose', true);
+
+%% Introduce wells
+% We will include two wells, one rate-controlled vertical well and one
+% horizontal well controlled by bottom-hole pressure. Wells are described
+% using a Peacemann model, giving an extra set of equations that need to be
+% assembled.
+%
+% The first well is vertical well (vertical is default):
+%
+% * completion in cells: cellsWell1
+% * controlled by injection rate = 1.0  [m^3/d]
+% * radius = 0.1.                       [m]
+%
+cellsWell1 =  1 : nx*ny : nx*ny*nz;
+radius     = .1;
+W = addWell([], G, rock, cellsWell1, 'Type', 'rate', ...
+            'Val', 1.0/day(), 'Radius', radius, 'name', 'I');
+disp('Well #1: '); display(W(1));
+
+%%
+% The second well is horizontal in the 'y' direction:
+%
+% * completion in cells: cellsWell2
+% * controlled by bottom hole pressure, bhp = 1e5 [Pa]
+% * radius = 0.1                                  [m]
+%
+cellsWell2 = nx : ny : nx*ny;
+W = addWell(W, G, rock, cellsWell2, 'Type', 'bhp', ...
+            'Val', 1.0e5, 'Radius', radius, 'Dir', 'y', 'name', 'P');
+disp('Well #2: '); display(W(2));
+
+%%
+% We plot the wells to check if the wells are placed as we wanted them.
+% (The plot will later be moved to subplot(2,2,1), hence we first find the
+% corresponding axes position before generating the handle graphics).
+subplot(2,2,1), pos = get(gca,'Position'); clf
+   plotGrid(G, 'FaceColor', 'none');
+   view(3), camproj perspective, axis tight off, camlight headlight
+   [ht, htxt, hs] = plotWell(G, W, 'radius', radius, 'height', 2);
+   set(htxt, 'FontSize', 16);
+
+%%
+% Once the wells are added, we can generate the components of the linear
+% system corresponding to the two wells and initialize the solution
+% structure (with correct bhp)
+resSol = initState(G, W, 0);
+display(resSol.wellSol);
+
+
+%% Solve linear system
+% Solve linear system construced from S and W to obtain solution for flow
+% and pressure in the reservoir and the wells.
+gravity off
+resSol = solveIncompFlow(resSol, G, S, fluid, 'wells', W);
+
+%% Report results
+% We move the plot of the grids and wells to the upper-left subplot. The
+% producer inflow profile is shown in the upper-right and the cell
+% pressures in the lower-left subplot. In the lower-right subplot, we show
+% the flux intensity, which must be constructed by averaging over cell
+% faces (this is what is achieved by 'rldecode' and 'accumarray')
+
+%subplot(2,2,1)
+   set(gca, 'Position', pos);  % move the current plot
+
+subplot(2,2,2)
+   plot(convertTo(-resSol.wellSol(2).flux, meter^3/day))
+   title('Producer inflow profile [m^3/d]');
+
+subplot(2,2,3)
+   plotCellData(G, convertTo(resSol.pressure(1:G.cells.num), barsa));
+   title('Pressure [bar]')
+   view(3), camproj perspective, axis tight off, camlight headlight
+
+subplot(2,2,4)
+   cellNo = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+   cf     = accumarray(cellNo, abs(resSol.flux(G.cells.faces(:,1))) );
+   plotCellData(G, convertTo(cf, meter^3/day) );
+   title('Sqrt of flux intensity [m^3/day]')
+   view(3), camproj perspective, axis tight off, camlight headlight
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>

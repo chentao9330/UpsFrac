@@ -1,0 +1,256 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>simpleUpscaleExample</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleUpscaleExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#2">define grids</a></li><li><a href="#3">BC</a></li><li><a href="#4">Set up solution structures</a></li><li><a href="#5">Compute upscaled perm</a></li><li><a href="#6">Make upscaled system structures</a></li><li><a href="#7">Solve systems</a></li><li><a href="#8">Compare inflow</a></li></ul></div><pre class="codeinput">mrstModule <span class="string">add</span> <span class="string">upscaling</span> <span class="string">coarsegrid</span>
+
+<span class="comment">% Simple upscaling example</span>
+<span class="comment">% NB: only works for Cartesian grids</span>
+
+
+cellDims  = [12, 12  1];
+upscaled  = [6, 6, 1];  <span class="comment">% number of blocks in the coarse grid</span>
+
+verbose   = true;
+</pre><h2>define grids<a name="2"></a></h2><pre class="codeinput">G         = cartGrid(cellDims, cellDims);
+G         = computeGeometry(G);
+G_ups     = cartGrid(upscaled, cellDims);
+G_ups     = computeGeometry(G_ups);
+
+p  = partitionUI(G, upscaled);
+p  = processPartition  (G, p, <span class="string">'Verbose'</span>, verbose);
+CG = generateCoarseGrid(G, p, <span class="string">'Verbose'</span>, verbose);
+
+rock.perm = convertFrom(100 * rand(G.cells.num,1), milli()*darcy());
+fluid     = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+</pre><pre class="codeoutput">Elapsed time is 0.126634 seconds.
+</pre><h2>BC<a name="3"></a></h2><p>fine scale bc:</p><pre class="codeinput">bc = pside([], G, <span class="string">'FRONT'</span>, 0);
+bnd_faces = bc.face;
+bc = pside(bc, G, <span class="string">'BACK'</span>,  1*barsa());
+
+<span class="comment">% upscaled bc</span>
+bc_ups = pside([], G_ups, <span class="string">'FRONT'</span>, 0);
+bnd_faces_ups = bc_ups.face;
+bc_ups = pside(bc_ups, G_ups, <span class="string">'BACK'</span>, 1*barsa());
+</pre><h2>Set up solution structures<a name="4"></a></h2><pre class="codeinput">xRef = initResSol( G, 0.0);
+xUps = initResSol( G_ups, 0.0);
+
+S  = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, verbose);
+</pre><pre class="codeoutput">Using inner product: 'ip_simple'.
+Computing cell inner products ...		Elapsed time is 0.016732 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.000166 seconds.
+</pre><h2>Compute upscaled perm<a name="5"></a></h2><pre class="codeinput">rockUps.perm = upscalePerm(G, CG, rock, <span class="string">'Verbose'</span>, verbose, <span class="string">'S'</span>, S);
+
+<span class="comment">% plot all permeabilities</span>
+figure;
+subplot(2,2,1)
+plotCellData(G, log10(rock.perm));axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+coaxis = caxis;
+title(<span class="string">'Fine perm'</span>)
+subplot(2,2,2)
+plotCellData(G_ups, log10(rockUps.perm(:,1)));  axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+title(<span class="string">'X perm'</span>)
+caxis(coaxis)
+subplot(2,2,3)
+plotCellData(G_ups,  log10(rockUps.perm(:,2)));  axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+title(<span class="string">'Y perm'</span>)
+caxis(coaxis)
+subplot(2,2,4)
+plotCellData(G_ups,  log10(rockUps.perm(:,3)));  axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+title(<span class="string">'Z perm'</span>)
+caxis(coaxis)
+</pre><pre class="codeoutput">Computing upscaled permeabilities... Elapsed time is 0.327056 seconds.
+</pre><img vspace="5" hspace="5" src="simpleUpscaleExample_01.png" alt=""> <h2>Make upscaled system structures<a name="6"></a></h2><pre class="codeinput">S_ups   = computeMimeticIP(G_ups, rockUps, <span class="string">'Verbose'</span>, verbose);
+</pre><pre class="codeoutput">Using inner product: 'ip_simple'.
+Computing cell inner products ...		Elapsed time is 0.003588 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.000065 seconds.
+</pre><h2>Solve systems<a name="7"></a></h2><pre class="codeinput">xRef = solveIncompFlow(xRef, G, S, fluid, <span class="string">'bc'</span>, bc, <span class="string">'Solver'</span>, <span class="string">'hybrid'</span>);
+xUps = solveIncompFlow(xUps, G_ups, S_ups, fluid, <span class="string">'bc'</span>, bc_ups, <span class="keyword">...</span>
+                       <span class="string">'Solver'</span>, <span class="string">'hybrid'</span>);
+</pre><h2>Compare inflow<a name="8"></a></h2><p>Check the total flux sum. These values are very close to each other.</p><pre class="codeinput">flux1 = sum(xRef  .flux(bnd_faces));
+flux2 = sum(xUps  .flux(bnd_faces_ups));
+
+disp([<span class="string">'Sum flux bnd finescale     : '</span>, num2str(flux1)]);
+disp([<span class="string">'Sum flux bnd upscaled Darcy: '</span>, num2str(flux2)]);
+
+
+flux1_face = xRef.flux(bnd_faces)    ./G.faces.areas(bnd_faces);
+flux2_face = xUps.flux(bnd_faces_ups)./G_ups.faces.areas(bnd_faces_ups);
+clf;
+hold <span class="string">on</span>
+
+<span class="comment">% Plot the flux on each interface along the boundary condition. The</span>
+<span class="comment">% smoothing effect of the upscaling proceedure is apparent: The fine scale</span>
+<span class="comment">% heterogenities are smoothed resulting in a flux which equal in the</span>
+<span class="comment">% average sense.</span>
+plot(G.faces.centroids(bnd_faces,1), flux1_face)
+plot(G_ups.faces.centroids(bnd_faces_ups,1), flux2_face, <span class="string">'red'</span> )
+title(<span class="string">'North boundary flux'</span>)
+legend({<span class="string">'Fine scale'</span>, <span class="string">'Upscaled'</span>})
+</pre><pre class="codeoutput">Sum flux bnd finescale     : 4.0579e-06
+Sum flux bnd upscaled Darcy: 3.9207e-06
+</pre><img vspace="5" hspace="5" src="simpleUpscaleExample_02.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+mrstModule add upscaling coarsegrid
+
+% Simple upscaling example 
+% NB: only works for Cartesian grids
+
+
+cellDims  = [12, 12  1];
+upscaled  = [6, 6, 1];  % number of blocks in the coarse grid
+
+verbose   = true;
+
+%% define grids
+G         = cartGrid(cellDims, cellDims);
+G         = computeGeometry(G);
+G_ups     = cartGrid(upscaled, cellDims);
+G_ups     = computeGeometry(G_ups);
+
+p  = partitionUI(G, upscaled);
+p  = processPartition  (G, p, 'Verbose', verbose);
+CG = generateCoarseGrid(G, p, 'Verbose', verbose);
+
+rock.perm = convertFrom(100 * rand(G.cells.num,1), milli()*darcy());
+fluid     = initSingleFluid('mu' ,    1*centi*poise     , ...
+                            'rho', 1014*kilogram/meter^3);
+
+%% BC
+% fine scale bc:
+bc = pside([], G, 'FRONT', 0);
+bnd_faces = bc.face;
+bc = pside(bc, G, 'BACK',  1*barsa());
+
+% upscaled bc
+bc_ups = pside([], G_ups, 'FRONT', 0);
+bnd_faces_ups = bc_ups.face;
+bc_ups = pside(bc_ups, G_ups, 'BACK', 1*barsa());
+
+
+%% Set up solution structures
+
+xRef = initResSol( G, 0.0);
+xUps = initResSol( G_ups, 0.0);
+
+S  = computeMimeticIP(G, rock, 'Verbose', verbose);
+ 
+%% Compute upscaled perm
+rockUps.perm = upscalePerm(G, CG, rock, 'Verbose', verbose, 'S', S);
+
+% plot all permeabilities
+figure;
+subplot(2,2,1)
+plotCellData(G, log10(rock.perm));axis equal tight off
+coaxis = caxis;
+title('Fine perm')
+subplot(2,2,2)
+plotCellData(G_ups, log10(rockUps.perm(:,1)));  axis equal tight off
+title('X perm')
+caxis(coaxis)
+subplot(2,2,3)
+plotCellData(G_ups,  log10(rockUps.perm(:,2)));  axis equal tight off
+title('Y perm')
+caxis(coaxis)
+subplot(2,2,4)
+plotCellData(G_ups,  log10(rockUps.perm(:,3)));  axis equal tight off
+title('Z perm')
+caxis(coaxis)
+
+
+%% Make upscaled system structures
+S_ups   = computeMimeticIP(G_ups, rockUps, 'Verbose', verbose);
+
+%% Solve systems
+xRef = solveIncompFlow(xRef, G, S, fluid, 'bc', bc, 'Solver', 'hybrid');
+xUps = solveIncompFlow(xUps, G_ups, S_ups, fluid, 'bc', bc_ups, ...
+                       'Solver', 'hybrid');
+
+
+%% Compare inflow
+% Check the total flux sum. These values are very close to each other.
+flux1 = sum(xRef  .flux(bnd_faces));
+flux2 = sum(xUps  .flux(bnd_faces_ups));
+
+disp(['Sum flux bnd finescale     : ', num2str(flux1)]);
+disp(['Sum flux bnd upscaled Darcy: ', num2str(flux2)]);
+
+
+flux1_face = xRef.flux(bnd_faces)    ./G.faces.areas(bnd_faces);
+flux2_face = xUps.flux(bnd_faces_ups)./G_ups.faces.areas(bnd_faces_ups);
+clf;
+hold on
+
+% Plot the flux on each interface along the boundary condition. The
+% smoothing effect of the upscaling proceedure is apparent: The fine scale
+% heterogenities are smoothed resulting in a flux which equal in the
+% average sense.
+plot(G.faces.centroids(bnd_faces,1), flux1_face)
+plot(G_ups.faces.centroids(bnd_faces_ups,1), flux2_face, 'red' )
+title('North boundary flux')
+legend({'Fine scale', 'Upscaled'})
+
+##### SOURCE END #####
+--></body></html>

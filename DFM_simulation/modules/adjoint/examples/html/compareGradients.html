@@ -1,0 +1,347 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>compareGradients</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="compareGradients.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><pre class="codeinput"><span class="comment">%compareGradients - compare gradients computed numerically and with adjoint</span>
+<span class="comment">%for simple test-problem</span>
+
+<span class="comment">%{
+</span><span class="comment">#COPYRIGHT#
+</span><span class="comment">%}
+</span>
+
+
+
+verbose = true;
+verboseLevel = 1;
+
+nx = 10; ny = 10; nz = 1;
+G  = cartGrid([nx ny nz]);
+G  = computeGeometry(G);
+
+rock.perm = exp(( 3*rand(nx*ny, 1) + 1))*100*milli*darcy;
+rock.perm = ones( size(rock.perm) )*milli*darcy;
+rock.poro = repmat(0.3, [G.cells.num, 1]);
+
+fluid  = initCoreyFluid(<span class="string">'mu'</span> , [   1,   5].*centi*poise    , <span class="keyword">...</span>
+                        <span class="string">'rho'</span>, [1014, 859]*kilogram/meter^3, <span class="keyword">...</span>
+                        <span class="string">'n'</span>  , [   2,   2]                 , <span class="keyword">...</span>
+                        <span class="string">'sr'</span> , [   0,   0]                 , <span class="keyword">...</span>
+                        <span class="string">'kwm'</span>, [   1,   1]);
+
+fluid  = adjointFluidFields(fluid);
+
+S = computeMimeticIP(G, rock, <span class="string">'Type'</span>, <span class="string">'comp_hybrid'</span>, <span class="string">'Verbose'</span>, verbose);
+
+<span class="comment">% Choose objective function</span>
+objectiveFunction = str2func(<span class="string">'simpleNPV'</span>);
+<span class="comment">%objectiveFunction = str2func('recovery');</span>
+
+<span class="comment">% Introduce wells</span>
+radius = .1;
+W = addWell([], G, rock, 1         , <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>,  100*barsa, <span class="string">'Radius'</span>, radius, <span class="string">'Name'</span>, <span class="string">'i1'</span>, <span class="string">'Comp_i'</span>, [1, 0]);
+W = addWell( W, G, rock, nx        , <span class="string">'Type'</span>, <span class="string">'rate'</span>, <span class="string">'Val'</span>,  -.5/day  , <span class="string">'Radius'</span>, radius, <span class="string">'Name'</span>, <span class="string">'p1'</span>, <span class="string">'Comp_i'</span>, [0, 1]);
+W = addWell( W, G, rock, nx*ny-nx+1, <span class="string">'Type'</span>, <span class="string">'rate'</span>, <span class="string">'Val'</span>,  -.5/day  , <span class="string">'Radius'</span>, radius, <span class="string">'Name'</span>, <span class="string">'p3'</span>, <span class="string">'Comp_i'</span>, [0, 1]);
+W = addWell( W, G, rock, nx*ny     , <span class="string">'Type'</span>, <span class="string">'rate'</span>, <span class="string">'Val'</span>,  -.5/day  , <span class="string">'Radius'</span>, radius, <span class="string">'Name'</span>, <span class="string">'p3'</span>, <span class="string">'Comp_i'</span>, [0, 1]);
+
+W = assembleWellSystem(G, W, <span class="string">'Type'</span>, <span class="string">'comp_hybrid'</span>);
+
+resSolInit = initResSol(G, 0.0);
+resSolInit.wellSol = initWellSol(W, 0);
+
+
+totVol   = sum(G.cells.volumes.*rock.poro);
+schedule = initSchedule(W, <span class="string">'NumSteps'</span>, 10, <span class="string">'TotalTime'</span>, totVol*day, <span class="string">'Verbose'</span>, verbose);
+
+
+controls = initControls(schedule, <span class="string">'ControllableWells'</span>, (2:4), <span class="keyword">...</span>
+                                  <span class="string">'Verbose'</span>, verbose, <span class="keyword">...</span>
+                                  <span class="string">'NumControlSteps'</span>, 10);
+
+<span class="comment">% forward run</span>
+simRes = runSchedule(resSolInit, G, S, W, rock, fluid, schedule, <span class="keyword">...</span>
+                             <span class="string">'VerboseLevel'</span>, verboseLevel);
+
+<span class="comment">% adjoint run</span>
+adjRes = runAdjoint(simRes, G, S, W, rock, fluid, schedule, controls, <span class="keyword">...</span>
+                    objectiveFunction, <span class="string">'VerboseLevel'</span>, verboseLevel);
+grad   = computeGradient(W, adjRes, schedule, controls);
+
+numGrad = computeNumericalGradient(simRes, G, S, W, rock, fluid, <span class="keyword">...</span>
+                                   schedule, controls, objectiveFunction)
+adjGrad = cell2mat(grad)
+
+
+figure; hold <span class="string">on</span>
+<span class="keyword">for</span> k = 1 : size(numGrad, 1);
+    plot(numGrad(k,:), <span class="string">'-ob'</span>);
+    plot(adjGrad(k,:), <span class="string">'-xr'</span>);
+<span class="keyword">end</span>
+legend(<span class="string">'Numerical'</span>, <span class="string">'Adjoint'</span>)
+</pre><pre class="codeoutput">Using inner product: 'ip_simple'.
+Computing cell inner products ...		Elapsed time is 0.026965 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.000221 seconds.
+Max error in inverse = 2.9976e-15
+
+----------------- DISPLAYING SCHEDULE ----------------
+
+Time interval :  0.00 - 259200.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  259200.00 - 518400.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  518400.00 - 777600.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  777600.00 - 1036800.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  1036800.00 - 1296000.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  1296000.00 - 1555200.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  1555200.00 - 1814400.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  1814400.00 - 2073600.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  2073600.00 - 2332800.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+Time interval :  2332800.00 - 2592000.00
+Well name           Type          Value
+       i1            bhp       10000000
+       p1           rate     -5.787e-06
+       p3           rate     -5.787e-06
+       p3           rate     -5.787e-06
+
+----------------- DISPLAYING CONTROL VARIABLES ----------------
+      Var     Name     Type         MaxMin
+      u_1       p1     rate     [-Inf Inf]
+      u_2       p3     rate     [-Inf Inf]
+      u_3       p3     rate     [-Inf Inf]
+
+******* Starting forward simulation *******
+Time step   1 of  10,   Pressure:    0.006 sec,   Transport:    0.025 sec
+Time step   2 of  10,   Pressure:    0.005 sec,   Transport:    0.016 sec
+Time step   3 of  10,   Pressure:    0.005 sec,   Transport:    0.023 sec
+Time step   4 of  10,   Pressure:    0.005 sec,   Transport:    0.016 sec
+Time step   5 of  10,   Pressure:    0.004 sec,   Transport:    0.013 sec
+Time step   6 of  10,   Pressure:    0.004 sec,   Transport:    0.014 sec
+Time step   7 of  10,   Pressure:    0.005 sec,   Transport:    0.014 sec
+Time step   8 of  10,   Pressure:    0.005 sec,   Transport:    0.014 sec
+Time step   9 of  10,   Pressure:    0.005 sec,   Transport:    0.014 sec
+Time step  10 of  10,   Pressure:    0.005 sec,   Transport:    0.014 sec
+
+******* Starting adjoint simulation *******
+Time step  10 of  10,   Transport:    0.002 sec,   Pressure:    0.007 sec
+Time step   9 of  10,   Transport:    0.002 sec,   Pressure:    0.006 sec
+Time step   8 of  10,   Transport:    0.002 sec,   Pressure:    0.007 sec
+Time step   7 of  10,   Transport:    0.002 sec,   Pressure:    0.007 sec
+Time step   6 of  10,   Transport:    0.002 sec,   Pressure:    0.007 sec
+Time step   5 of  10,   Transport:    0.002 sec,   Pressure:    0.006 sec
+Time step   4 of  10,   Transport:    0.002 sec,   Pressure:    0.006 sec
+Time step   3 of  10,   Transport:    0.002 sec,   Pressure:    0.006 sec
+Time step   2 of  10,   Transport:    0.002 sec,   Pressure:    0.006 sec
+Time step   1 of  10,   Transport:    0.002 sec,   Pressure:    0.006 sec
+
+numGrad =
+
+   1.0e+07 *
+
+    1.8879    1.7619    1.7223    1.7232    1.7329    1.7534    1.7840    1.8226    1.8664    1.9124
+    1.8879    1.7618    1.7223    1.7231    1.7329    1.7533    1.7840    1.8227    1.8667    1.9128
+    1.7564    1.4665    1.2117    0.9860    0.8046    0.6396    0.4798    0.3235    0.1712    0.0251
+
+
+adjGrad =
+
+   1.0e+07 *
+
+    1.8879    1.7618    1.7223    1.7231    1.7329    1.7533    1.7840    1.8226    1.8664    1.9124
+    1.8879    1.7618    1.7223    1.7231    1.7329    1.7534    1.7841    1.8227    1.8667    1.9128
+    1.7563    1.4665    1.2116    0.9859    0.8046    0.6396    0.4798    0.3235    0.1711    0.0251
+
+</pre><img vspace="5" hspace="5" src="compareGradients_01.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%compareGradients - compare gradients computed numerically and with adjoint
+%for simple test-problem
+
+%{
+#COPYRIGHT#
+%}
+
+% $Date: 2012-10-01 10:02:27 +0200 (Mon, 01 Oct 2012) $
+% $Revision: 9877 $
+
+verbose = true;
+verboseLevel = 1;
+
+nx = 10; ny = 10; nz = 1;
+G  = cartGrid([nx ny nz]);
+G  = computeGeometry(G);
+
+rock.perm = exp(( 3*rand(nx*ny, 1) + 1))*100*milli*darcy;
+rock.perm = ones( size(rock.perm) )*milli*darcy;
+rock.poro = repmat(0.3, [G.cells.num, 1]);
+
+fluid  = initCoreyFluid('mu' , [   1,   5].*centi*poise    , ...
+                        'rho', [1014, 859]*kilogram/meter^3, ...
+                        'n'  , [   2,   2]                 , ...
+                        'sr' , [   0,   0]                 , ...
+                        'kwm', [   1,   1]);
+
+fluid  = adjointFluidFields(fluid);
+
+S = computeMimeticIP(G, rock, 'Type', 'comp_hybrid', 'Verbose', verbose);
+
+% Choose objective function
+objectiveFunction = str2func('simpleNPV');
+%objectiveFunction = str2func('recovery');
+
+% Introduce wells
+radius = .1;
+W = addWell([], G, rock, 1         , 'Type', 'bhp' , 'Val',  100*barsa, 'Radius', radius, 'Name', 'i1', 'Comp_i', [1, 0]);
+W = addWell( W, G, rock, nx        , 'Type', 'rate', 'Val',  -.5/day  , 'Radius', radius, 'Name', 'p1', 'Comp_i', [0, 1]);
+W = addWell( W, G, rock, nx*ny-nx+1, 'Type', 'rate', 'Val',  -.5/day  , 'Radius', radius, 'Name', 'p3', 'Comp_i', [0, 1]);
+W = addWell( W, G, rock, nx*ny     , 'Type', 'rate', 'Val',  -.5/day  , 'Radius', radius, 'Name', 'p3', 'Comp_i', [0, 1]);
+
+W = assembleWellSystem(G, W, 'Type', 'comp_hybrid');
+
+resSolInit = initResSol(G, 0.0);
+resSolInit.wellSol = initWellSol(W, 0);
+
+
+totVol   = sum(G.cells.volumes.*rock.poro);
+schedule = initSchedule(W, 'NumSteps', 10, 'TotalTime', totVol*day, 'Verbose', verbose);
+
+
+controls = initControls(schedule, 'ControllableWells', (2:4), ...
+                                  'Verbose', verbose, ...
+                                  'NumControlSteps', 10);
+                              
+% forward run
+simRes = runSchedule(resSolInit, G, S, W, rock, fluid, schedule, ...
+                             'VerboseLevel', verboseLevel);
+                              
+% adjoint run
+adjRes = runAdjoint(simRes, G, S, W, rock, fluid, schedule, controls, ...
+                    objectiveFunction, 'VerboseLevel', verboseLevel);
+grad   = computeGradient(W, adjRes, schedule, controls);  
+
+numGrad = computeNumericalGradient(simRes, G, S, W, rock, fluid, ...
+                                   schedule, controls, objectiveFunction)
+adjGrad = cell2mat(grad)
+
+
+figure; hold on
+for k = 1 : size(numGrad, 1);
+    plot(numGrad(k,:), '-ob');
+    plot(adjGrad(k,:), '-xr');
+end
+legend('Numerical', 'Adjoint')
+
+
+##### SOURCE END #####
+--></body></html>

@@ -1,0 +1,241 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>example1</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="example1.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Example 1: The Nonuniform Coarsening Algorithm</a></li><li><a href="#2">Create a simple model</a></li><li><a href="#3">Segement indicator</a></li><li><a href="#4">Merge blocks</a></li><li><a href="#5">Refine blocks</a></li><li><a href="#6">Merge blocks</a></li><li><a href="#7">Improved refinement algorithm - part 1</a></li><li><a href="#9">Improved refinement algorithm - part 2</a></li><li><a href="#11">Improved refinement algorithm - part 3</a></li><li><a href="#13">Compare the different coarse grids</a></li></ul></div><h2>Example 1: The Nonuniform Coarsening Algorithm<a name="1"></a></h2><p>Our first example shows the four basic steps of the nonuniform coarsening algorithm proposed by Aarnes et al. [1]. The algorithm is an ad hoc approach for creating a coarse grid that distinguishes high-flow and low-flow regions, thereby trying to mimic a streamline-type grid without moving grid points. The algorithm consists of four steps:</p><div><ol><li>Segment log(<tt>v)</tt> to get an initial partition.</li><li>Merge blocks whose volumes are below a lower limit.</li><li>Refine blocks in which the flow exceeds an upper limit</li><li>Repeat Step 2 and terminate.</li></ol></div><p>The algorithm is a special case of a more general framework for creating coarse grids based on amalgamation of cells from a fine grid, as described by Hauge et al. [2].</p><p><b>References:</b></p><div><ol><li>J. E. Aarnes, V. L. Hauge, Y. Efendiev, Coarsening of three-dimensional   Structured and unstructured grids for subsurface flow. Advances in   Water Resources, Volume 30, Issue 11, November 2007, pp. 2177--2193.</li><li>V. L. Hauge, K.-A. Lie, J. R. Natvig,   Grid coarsening based on amalgamation for multi-fidelity transport   solvers, September 2010.   <a href="http://www.sintef.no/Projectweb/GeoScale/Publications/">http://www.sintef.no/Projectweb/GeoScale/Publications/</a></li></ol></div><pre class="codeinput"><span class="keyword">try</span>
+   require <span class="string">gridtools</span>
+<span class="keyword">catch</span> me
+   mrstModule <span class="string">add</span> <span class="string">gridtools</span>;
+<span class="keyword">end</span>
+
+<span class="keyword">try</span>
+   require <span class="string">coarsegrid</span>
+<span class="keyword">catch</span> me
+   mrstModule <span class="string">add</span> <span class="string">coarsegrid</span>;
+<span class="keyword">end</span>
+</pre><h2>Create a simple model<a name="2"></a></h2><p>We consider an 8x8 Cartesian grid with an artificial flow indicator in the form of a sine-wave making an angle with the coordinate directions.</p><pre class="codeinput">G = computeGeometry(cartGrid([8 8]));
+iVel = sin(pi*(G.cells.centroids(:,1) + G.cells.centroids(:,2))/3);
+iVel = iVel - min(iVel) + 1;
+iVol = ones(size(iVel));
+NL  = 4;
+NU  = 8;
+</pre><h2>Segement indicator<a name="3"></a></h2><p>In the first step, we segment the indicator value into ten bins to distinguish the high-flow and low-flow zones.</p><pre class="codeinput">p1 = segmentIndicator(G, iVel, 10);
+plotCoarseningStep(p1, G, iVol, iVel, NL, NU, 1, 1);
+</pre><img vspace="5" hspace="5" src="example1_01.png" alt=""> <h2>Merge blocks<a name="4"></a></h2><p>The segmentation will typically create a speckle of small blocks that we do not want in our coarse grid. We therefore merge blocks that have a volume below NL*G.cells.volumes/G.cells.num with the neighboring block that has the closest iVel value.</p><pre class="codeinput">p2 = mergeBlocks2(p1, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p2, G, iVol, iVel, NL, NU, 2, 1);
+</pre><img vspace="5" hspace="5" src="example1_02.png" alt=""> <h2>Refine blocks<a name="5"></a></h2><p>In the next step we check if there are any blocks in which the iVel indicator exceeds the prescribed upper bound and if so we refine these blocks. To this end, we use a greedy algorithm that starts at one cell and grows a new block until the upper bound is exceeded. If necessary, the process is repeated.</p><pre class="codeinput">p3 = refineBlocks(p2, G, iVel, NU, @refineGreedy);
+plotCoarseningStep(p3, G, iVol, iVel, NL, NU, 3, 1);
+</pre><img vspace="5" hspace="5" src="example1_03.png" alt=""> <h2>Merge blocks<a name="6"></a></h2><p>The greedy refinement may have created some small cells (typically if the blocks to be refined only slightly exceeds the upper bound). We therefore perform a second merging step to get rid of blocks that have too small volume.</p><pre class="codeinput">p4 = mergeBlocks2(p3, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p4, G, iVol, iVel, NL, NU, 4, 1);
+</pre><img vspace="5" hspace="5" src="example1_04.png" alt=""> <h2>Improved refinement algorithm - part 1<a name="7"></a></h2><p>The <tt>refineGreedy</tt> routine grows blocks somewhat agressively by adding rings of neighbouring cells at the time. The <tt>refineGreedy2</tt> method only adds the neighbouring cells necessary to reach the upper limit.</p><pre class="codeinput">p3 = refineBlocks(p2, G, iVel, NU, @refineGreedy2);
+p5 = mergeBlocks2(p3, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p5, G, iVol, iVel, NL, NU, 4, 1);
+</pre><img vspace="5" hspace="5" src="example1_05.png" alt=""> <p>With such small grid blocks, the algorithm does not have many choices and therefore produces a grid that has two blocks that violate the upper bound. In general, it is our experience that <tt>refineGreedy2</tt> produces better results than the original algorithm proposed by Aarnes et al.</p><h2>Improved refinement algorithm - part 2<a name="9"></a></h2><p>Even better results may be obtained if we use the <tt>refineGreedy3</tt> method in which the neighbouring cells are sorted in descending order in terms of the number of faces shared with cells in the growing block. Unfortunately, the method is quite expensive and its use is not recommended for very large models.</p><pre class="codeinput">p3 = refineBlocks(p2, G, iVel, NU, @refineGreedy3, <span class="string">'nlevel'</span>,1);
+p6 = mergeBlocks2(p3, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p6, G, iVol, iVel, NL, NU, 4, 1);
+</pre><img vspace="5" hspace="5" src="example1_06.png" alt=""> <p>In this particular example, the result is 'perfect' since there are no blocks that violate the lower and upper bounds. In our experience, however, it is hard to create grids that satisfy both constraints and these should generally be seen as soft (and indicatory) bounds.</p><h2>Improved refinement algorithm - part 3<a name="11"></a></h2><p>As a fourth alternative, we can use the <tt>refineGreedy4</tt> method in which the neighbouring cells are sorted in descending order in terms of the discrepancy between the flow indicator value in each neighbour cell and the growing block.</p><pre class="codeinput">p3 = refineBlocks(p2, G, iVel, NU, @refineGreedy4, <span class="string">'nlevel'</span>,1);
+p7 = mergeBlocks2(p3, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p7, G, iVol, iVel, NL, NU, 4, 1);
+</pre><img vspace="5" hspace="5" src="example1_07.png" alt=""> <p>In this particular example, the result is no better than for <tt>refineGreedy2</tt>. However, the method may be quite useful in some other examples.</p><h2>Compare the different coarse grids<a name="13"></a></h2><pre class="codeinput">clf
+p = [p4 p5 p6 p7];
+<span class="keyword">for</span> i=1:4
+   subplot(2,2,i); plotCellData(G,iVel,<span class="string">'FaceAlpha'</span>,.3);
+   outlineCoarseGrid(G,p(:,i),<span class="string">'Color'</span>,<span class="string">'k'</span>),
+   title(sprintf(<span class="string">'refineGreedy%d'</span>,i)); axis <span class="string">off</span> <span class="string">equal</span>
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="example1_08.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Example 1: The Nonuniform Coarsening Algorithm
+% Our first example shows the four basic steps of the nonuniform coarsening
+% algorithm proposed by Aarnes et al. [1]. The algorithm is an ad hoc
+% approach for creating a coarse grid that distinguishes high-flow and
+% low-flow regions, thereby trying to mimic a streamline-type grid without
+% moving grid points. The algorithm consists of four steps:
+%
+% # Segment log(|v)| to get an initial partition.
+% # Merge blocks whose volumes are below a lower limit.
+% # Refine blocks in which the flow exceeds an upper limit
+% # Repeat Step 2 and terminate.
+%
+% The algorithm is a special case of a more general framework for creating
+% coarse grids based on amalgamation of cells from a fine grid, as
+% described by Hauge et al. [2].
+%
+% *References:*
+%
+% # J. E. Aarnes, V. L. Hauge, Y. Efendiev, Coarsening of three-dimensional
+%   Structured and unstructured grids for subsurface flow. Advances in
+%   Water Resources, Volume 30, Issue 11, November 2007, pp. 2177REPLACE_WITH_DASH_DASH2193.
+% # V. L. Hauge, K.-A. Lie, J. R. Natvig,
+%   Grid coarsening based on amalgamation for multi-fidelity transport
+%   solvers, September 2010.
+%   http://www.sintef.no/Projectweb/GeoScale/Publications/
+
+try
+   require gridtools
+catch me
+   mrstModule add gridtools;
+end
+
+try
+   require coarsegrid
+catch me
+   mrstModule add coarsegrid;
+end
+%% Create a simple model
+% We consider an 8x8 Cartesian grid with an artificial flow indicator in
+% the form of a sine-wave making an angle with the coordinate directions.
+G = computeGeometry(cartGrid([8 8]));
+iVel = sin(pi*(G.cells.centroids(:,1) + G.cells.centroids(:,2))/3);
+iVel = iVel - min(iVel) + 1;
+iVol = ones(size(iVel));
+NL  = 4;
+NU  = 8;
+
+%% Segement indicator
+% In the first step, we segment the indicator value into ten bins to
+% distinguish the high-flow and low-flow zones.
+p1 = segmentIndicator(G, iVel, 10);
+plotCoarseningStep(p1, G, iVol, iVel, NL, NU, 1, 1);
+
+%% Merge blocks
+% The segmentation will typically create a speckle of small blocks that we
+% do not want in our coarse grid. We therefore merge blocks that have a
+% volume below NL*G.cells.volumes/G.cells.num with the neighboring block
+% that has the closest iVel value.
+p2 = mergeBlocks2(p1, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p2, G, iVol, iVel, NL, NU, 2, 1);
+
+%% Refine blocks
+% In the next step we check if there are any blocks in which the iVel
+% indicator exceeds the prescribed upper bound and if so we refine these
+% blocks. To this end, we use a greedy algorithm that starts at one cell
+% and grows a new block until the upper bound is exceeded. If necessary,
+% the process is repeated.
+p3 = refineBlocks(p2, G, iVel, NU, @refineGreedy);
+plotCoarseningStep(p3, G, iVol, iVel, NL, NU, 3, 1);
+
+%% Merge blocks
+% The greedy refinement may have created some small cells (typically if
+% the blocks to be refined only slightly exceeds the upper bound). We
+% therefore perform a second merging step to get rid of blocks that have
+% too small volume.
+p4 = mergeBlocks2(p3, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p4, G, iVol, iVel, NL, NU, 4, 1);
+
+%% Improved refinement algorithm - part 1
+% The |refineGreedy| routine grows blocks somewhat agressively by adding
+% rings of neighbouring cells at the time. The |refineGreedy2| method only
+% adds the neighbouring cells necessary to reach the upper limit.
+p3 = refineBlocks(p2, G, iVel, NU, @refineGreedy2);
+p5 = mergeBlocks2(p3, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p5, G, iVol, iVel, NL, NU, 4, 1);
+
+%%
+% With such small grid blocks, the algorithm does not have many choices and
+% therefore produces a grid that has two blocks that violate the upper
+% bound. In general, it is our experience that |refineGreedy2| produces
+% better results than the original algorithm proposed by Aarnes et al.
+
+%% Improved refinement algorithm - part 2
+% Even better results may be obtained if we use the |refineGreedy3| method
+% in which the neighbouring cells are sorted in descending order in terms
+% of the number of faces shared with cells in the growing block.
+% Unfortunately, the method is quite expensive and its use is not
+% recommended for very large models.
+p3 = refineBlocks(p2, G, iVel, NU, @refineGreedy3, 'nlevel',1);
+p6 = mergeBlocks2(p3, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p6, G, iVol, iVel, NL, NU, 4, 1);
+
+%%
+% In this particular example, the result is 'perfect' since there are no
+% blocks that violate the lower and upper bounds. In our experience,
+% however, it is hard to create grids that satisfy both constraints and
+% these should generally be seen as soft (and indicatory) bounds.
+
+%% Improved refinement algorithm - part 3
+% As a fourth alternative, we can use the |refineGreedy4| method
+% in which the neighbouring cells are sorted in descending order in terms
+% of the discrepancy between the flow indicator value in each neighbour
+% cell and the growing block.
+p3 = refineBlocks(p2, G, iVel, NU, @refineGreedy4, 'nlevel',1);
+p7 = mergeBlocks2(p3, G, iVol, iVel, NL, NU);
+plotCoarseningStep(p7, G, iVol, iVel, NL, NU, 4, 1);
+
+%%
+% In this particular example, the result is no better than for
+% |refineGreedy2|. However, the method may be quite useful in some other
+% examples.
+
+%% Compare the different coarse grids
+clf
+p = [p4 p5 p6 p7];
+for i=1:4
+   subplot(2,2,i); plotCellData(G,iVel,'FaceAlpha',.3);
+   outlineCoarseGrid(G,p(:,i),'Color','k'), 
+   title(sprintf('refineGreedy%d',i)); axis off equal
+end
+
+##### SOURCE END #####
+--></body></html>

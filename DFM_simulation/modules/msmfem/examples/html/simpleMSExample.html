@@ -1,0 +1,242 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>simpleMSExample</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleMSExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Multiscale Pressure Solver: Flow Driven by Horizontal and Vertical Well</a></li><li><a href="#2">Define and visualize the model</a></li><li><a href="#3">Set up solution structures</a></li><li><a href="#4">Partition the grid</a></li><li><a href="#5">plot output</a></li></ul></div><h2>Multiscale Pressure Solver: Flow Driven by Horizontal and Vertical Well<a name="1"></a></h2><p>Compare the fine-grid and the multiscale pressure solver by solving the single-phase pressure equation</p><p><img src="simpleMSExample_eq63123.png" alt="$$\nabla\cdot v = q, \qquad v=-\frac{K}{\mu}\nabla p,$$"></p><p>for a Cartesian grid with isotropic, homogeneous permeability</p><pre class="codeinput">require <span class="string">coarsegrid</span>
+</pre><h2>Define and visualize the model<a name="2"></a></h2><p>We construct the Cartesian grid, set the permeability to 100 mD, and use the default single-phase fluid with unit viscosity</p><pre class="codeinput">cellDims  = [40, 40, 10];
+verbose   = mrstVerbose;
+G         = cartGrid(cellDims, cellDims);
+G         = computeGeometry(G);
+rock.perm = repmat(100*milli*darcy, [G.cells.num, 1]);
+fluid     = initSimpleFluid(<span class="string">'mu'</span> , [   1,  10]*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, [1000, 700]*kilogram/meter^3, <span class="keyword">...</span>
+                            <span class="string">'n'</span>  , [   2,   2]);
+
+<span class="comment">% Set two wells, one vertical and one horizontal</span>
+W = struct([]);
+W = verticalWell(W, G, rock, 40, 40, 1:10, <span class="keyword">...</span>
+                 <span class="string">'Type'</span>, <span class="string">'rate'</span>, <span class="string">'Val'</span>, 1*meter^3/day, <span class="keyword">...</span>
+                 <span class="string">'Radius'</span>, .1, <span class="string">'Name'</span>, <span class="string">'I'</span>);
+W = addWell(W, G, rock, 1:40, <span class="string">'Type'</span>,<span class="string">'bhp'</span>, <span class="keyword">...</span>
+            <span class="string">'Val'</span>, 0, <span class="string">'Radius'</span>, .1, <span class="string">'Dir'</span>, <span class="string">'x'</span>, <span class="string">'Name'</span>, <span class="string">'P'</span>);
+
+<span class="comment">% Visualize the model</span>
+figure;
+plotGrid(G, <span class="string">'FaceColor'</span>, <span class="string">'none'</span>, <span class="string">'EdgeColor'</span>, [0.65, 0.65, 0.65]);
+plotWell(G, W, <span class="string">'radius'</span>, 0.1, <span class="string">'color'</span>, <span class="string">'r'</span>);
+view(3); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+</pre><img vspace="5" hspace="5" src="simpleMSExample_01.png" alt=""> <h2>Set up solution structures<a name="3"></a></h2><p>Here we need four solution structures, two for each simulator to hold the solutions on the grid and in the wells, respectively.</p><pre class="codeinput">xRef = initState(G, W, 0);
+xMs  = initState(G, W, 0);
+</pre><h2>Partition the grid<a name="4"></a></h2><p>We partition the fine grid into a regular 5-by-5-by-2 coarse grid in index space so that each coarse block holds 8-by-8-by-5 fine cells. The resulting vector <a href="p">p</a> has one entry per fine-grid cell giving the index of the corresponding coarse block. After the grid is partitioned in index space, we postprocess it to make sure that all blocks consist of a connected set of fine cells. This step is superfluous for Cartesian grids, but is required for grids that are only logically Cartesian (e.g., corner-point and other mapped grids that may contain inactive or degenerate cells).</p><pre class="codeinput">p  = partitionUI(G, [5, 5, 2]);
+p  = processPartition  (G, p, <span class="string">'Verbose'</span>, verbose);
+
+figure;
+plotCellData(G,mod(p,2)); view(3); axis <span class="string">equal</span> <span class="string">tight</span> <span class="string">off</span>
+
+CG = generateCoarseGrid(G, p, <span class="string">'Verbose'</span>, verbose);
+
+S  = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, verbose);
+CS = generateCoarseSystem (G, rock, S, CG, ones([G.cells.num, 1]), <span class="keyword">...</span>
+                           <span class="string">'Verbose'</span>, verbose);
+
+W = generateCoarseWellSystem(G, S, CG, CS, ones([G.cells.num, 1]), rock, W);
+
+xRef = solveIncompFlow  (xRef, G, S, fluid, <span class="string">'wells'</span>, W, <span class="string">'Solver'</span>, <span class="string">'hybrid'</span>);
+xMs  = solveIncompFlowMS(xMs, G, CG, p, S, CS, fluid, <span class="string">'wells'</span>, W, <span class="keyword">...</span>
+                         <span class="string">'Solver'</span>, <span class="string">'hybrid'</span>);
+
+dp = @(x) num2str(convertTo(x(1).pressure, barsa));
+disp([<span class="string">'DeltaP - Fine: '</span>, dp(xRef.wellSol)]);
+disp([<span class="string">'DeltaP - Ms:   '</span>, dp(xMs .wellSol)]);
+</pre><pre class="codeoutput">DeltaP - Fine: 3.7478
+DeltaP - Ms:   3.7875
+</pre><img vspace="5" hspace="5" src="simpleMSExample_02.png" alt=""> <h2>plot output<a name="5"></a></h2><pre class="codeinput">f = figure;
+subplot(2,2,1)
+   plotGrid(G, <span class="string">'FaceColor'</span>, <span class="string">'none'</span>, <span class="string">'EdgeColor'</span>, [.6, .6, .6]);
+   plotGrid(G, W(1).cells, <span class="string">'FaceColor'</span>, <span class="string">'b'</span>, <span class="string">'EdgeColor'</span>, <span class="string">'b'</span>);
+   plotGrid(G, W(2).cells, <span class="string">'FaceColor'</span>, <span class="string">'r'</span>, <span class="string">'EdgeColor'</span>, <span class="string">'r'</span>);
+   title(<span class="string">'Well cells'</span>)
+   view(3); camproj <span class="string">perspective</span>; axis <span class="string">tight</span>; axis <span class="string">equal</span>; camlight <span class="string">headlight</span>;
+
+subplot(2,2,2)
+   plot(convertTo(xRef.wellSol(2).flux, meter^3/day), <span class="string">'b'</span>); hold <span class="string">on</span>
+   plot(convertTo(xMs.wellSol (2).flux, meter^3/day), <span class="string">'r'</span>);
+   legend(<span class="string">'Fine'</span>,<span class="string">'Multiscale'</span>)
+   title(<span class="string">'Producer inflow profile'</span>)
+
+subplot(2,2,3)
+   plotCellData(G, convertTo(xRef.pressure(1:G.cells.num), barsa));
+   title(<span class="string">'Pressure Fine'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+   cax = caxis; colorbar
+
+subplot(2,2,4)
+   plotCellData(G, convertTo(xMs.pressure(1:G.cells.num), barsa));
+   title(<span class="string">'Pressure Coarse'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+   caxis(cax); colorbar
+</pre><img vspace="5" hspace="5" src="simpleMSExample_03.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Multiscale Pressure Solver: Flow Driven by Horizontal and Vertical Well
+% Compare the fine-grid and the multiscale pressure solver by solving the
+% single-phase pressure equation
+%
+% $$\nabla\cdot v = q, \qquad v=-\frac{K}{\mu}\nabla p,$$
+%
+% for a Cartesian grid with isotropic, homogeneous permeability
+require coarsegrid
+
+%% Define and visualize the model
+% We construct the Cartesian grid, set the permeability to 100 mD, and
+% use the default single-phase fluid with unit viscosity
+cellDims  = [40, 40, 10];
+verbose   = mrstVerbose;
+G         = cartGrid(cellDims, cellDims);
+G         = computeGeometry(G);
+rock.perm = repmat(100*milli*darcy, [G.cells.num, 1]);
+fluid     = initSimpleFluid('mu' , [   1,  10]*centi*poise     , ...
+                            'rho', [1000, 700]*kilogram/meter^3, ...
+                            'n'  , [   2,   2]);
+
+% Set two wells, one vertical and one horizontal
+W = struct([]);
+W = verticalWell(W, G, rock, 40, 40, 1:10, ...
+                 'Type', 'rate', 'Val', 1*meter^3/day, ...
+                 'Radius', .1, 'Name', 'I');
+W = addWell(W, G, rock, 1:40, 'Type','bhp', ...
+            'Val', 0, 'Radius', .1, 'Dir', 'x', 'Name', 'P');
+         
+% Visualize the model
+figure;
+plotGrid(G, 'FaceColor', 'none', 'EdgeColor', [0.65, 0.65, 0.65]);
+plotWell(G, W, 'radius', 0.1, 'color', 'r');
+view(3); axis equal tight off
+
+%% Set up solution structures
+% Here we need four solution structures, two for each simulator to hold the
+% solutions on the grid and in the wells, respectively.
+xRef = initState(G, W, 0);
+xMs  = initState(G, W, 0);
+
+%% Partition the grid
+% We partition the fine grid into a regular 5-by-5-by-2 coarse grid in
+% index space so that each coarse block holds 8-by-8-by-5 fine cells. The
+% resulting vector <p> has one entry per fine-grid cell giving the index of
+% the corresponding coarse block. After the grid is partitioned in index
+% space, we postprocess it to make sure that all blocks consist of a
+% connected set of fine cells. This step is superfluous for Cartesian
+% grids, but is required for grids that are only logically Cartesian (e.g.,
+% corner-point and other mapped grids that may contain inactive or
+% degenerate cells).
+p  = partitionUI(G, [5, 5, 2]);
+p  = processPartition  (G, p, 'Verbose', verbose);
+
+figure;
+plotCellData(G,mod(p,2)); view(3); axis equal tight off
+
+CG = generateCoarseGrid(G, p, 'Verbose', verbose);
+
+S  = computeMimeticIP(G, rock, 'Verbose', verbose);
+CS = generateCoarseSystem (G, rock, S, CG, ones([G.cells.num, 1]), ...
+                           'Verbose', verbose);
+
+W = generateCoarseWellSystem(G, S, CG, CS, ones([G.cells.num, 1]), rock, W);
+
+xRef = solveIncompFlow  (xRef, G, S, fluid, 'wells', W, 'Solver', 'hybrid');
+xMs  = solveIncompFlowMS(xMs, G, CG, p, S, CS, fluid, 'wells', W, ...
+                         'Solver', 'hybrid');
+
+dp = @(x) num2str(convertTo(x(1).pressure, barsa));
+disp(['DeltaP - Fine: ', dp(xRef.wellSol)]);
+disp(['DeltaP - Ms:   ', dp(xMs .wellSol)]);
+
+%% plot output
+f = figure;
+subplot(2,2,1)
+   plotGrid(G, 'FaceColor', 'none', 'EdgeColor', [.6, .6, .6]);
+   plotGrid(G, W(1).cells, 'FaceColor', 'b', 'EdgeColor', 'b');
+   plotGrid(G, W(2).cells, 'FaceColor', 'r', 'EdgeColor', 'r');
+   title('Well cells')
+   view(3); camproj perspective; axis tight; axis equal; camlight headlight;
+
+subplot(2,2,2)
+   plot(convertTo(xRef.wellSol(2).flux, meter^3/day), 'b'); hold on
+   plot(convertTo(xMs.wellSol (2).flux, meter^3/day), 'r');
+   legend('Fine','Multiscale')
+   title('Producer inflow profile')
+
+subplot(2,2,3)
+   plotCellData(G, convertTo(xRef.pressure(1:G.cells.num), barsa));
+   title('Pressure Fine')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+   cax = caxis; colorbar
+
+subplot(2,2,4)
+   plotCellData(G, convertTo(xMs.pressure(1:G.cells.num), barsa));
+   title('Pressure Coarse')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+   caxis(cax); colorbar
+
+##### SOURCE END #####
+--></body></html>

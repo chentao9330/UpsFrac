@@ -1,0 +1,468 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>OilWaterAdjointExample</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="OilWaterAdjointExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Read the problem from a deckfile</a></li><li><a href="#2">Visualize the fluid properties (Relative permeability)</a></li><li><a href="#3">Show the schedules</a></li><li><a href="#4">Visualize fluid properties (B)</a></li><li><a href="#5">Compute constants</a></li><li><a href="#6">Set up reservoir</a></li><li><a href="#7">Run the whole schedule</a></li><li><a href="#8">Create objective functions</a></li><li><a href="#9">Compute derivatives using the adjoint formulation</a></li><li><a href="#10">Find gradients numerically</a></li><li><a href="#11">Plot the gradients</a></li><li><a href="#12">Plot the time taken</a></li></ul></div><h2>Read the problem from a deckfile<a name="1"></a></h2><p>The problem is defined in 'INPUT_NUMGRAD.DATA' which is a simple <img src="OilWaterAdjointExample_eq45692.png" alt="$10\times1\times10$"> Cartesian grid with uniform permeability. We read the deck and create the grid, rock and fluid structures from the resulting output. This requires the deckformat module.</p><pre class="codeinput">require <span class="string">deckformat</span>
+
+current_dir = fileparts(mfilename(<span class="string">'fullpath'</span>));
+fn    = fullfile(current_dir, <span class="string">'simple10x1x10.data'</span>);
+deck = readEclipseDeck(fn);
+
+<span class="comment">% Convert to MRST units (SI)</span>
+deck = convertDeckUnits(deck);
+
+<span class="comment">% Create grid</span>
+G = initEclipseGrid(deck);
+
+<span class="comment">% Set up the rock structure</span>
+rock  = initEclipseRock(deck);
+rock  = compressRock(rock, G.cells.indexMap);
+
+<span class="comment">% Create fluid</span>
+fluid = initDeckADIFluid(deck);
+
+<span class="comment">% Get schedule</span>
+schedule = deck.SCHEDULE;
+
+<span class="comment">% Enable this to get convergence reports when solving schedules</span>
+verbose = false;
+</pre><h2>Visualize the fluid properties (Relative permeability)<a name="2"></a></h2><p>While the geometry is trivial, we can examine the fluid properties. We do this by creating a vector containing the whole range of saturation values and sampling the functions contained in the fluid object.</p><pre class="codeinput">s = 0:0.05:1;
+clf;
+subplot(2,1,1)
+plot(s, fluid.krW(s))
+title(<span class="string">'kr_w'</span>)
+
+subplot(2,1,2)
+plot(s, fluid.krOW(s))
+title(<span class="string">'kr_{ow}'</span>)
+</pre><img vspace="5" hspace="5" src="OilWaterAdjointExample_01.png" alt=""> <h2>Show the schedules<a name="3"></a></h2><p>There are three different well setups in the schedule. We are interested in the gradient based on these wells. We convert the timesteps to days to get better plots and visualize the controls for all the timesteps to show timescales.</p><pre class="codeinput">inj = vertcat(schedule.control.WCONINJE) <span class="comment">%#ok intentional display</span>
+prod = vertcat(schedule.control.WCONPROD) <span class="comment">%#ok intentional display</span>
+timesteps = convertTo(cumsum(schedule.step.val), day);
+controls  = schedule.step.control;
+
+<span class="comment">% Extract rates and pressures</span>
+rates     = convertTo([inj{:, 5}], stb/day);
+pressures = convertTo([prod{:, 9}], milli*barsa);
+
+<span class="comment">% Plot pressures and rates in each timestep.</span>
+clf;
+subplot(2,1,1)
+plot(timesteps, pressures(controls), <span class="string">'-x'</span>)
+title(<span class="string">'Producer BHP'</span>);
+ylabel(<span class="string">'millibar'</span>)
+xlabel(<span class="string">'days'</span>)
+axis(axis() + [0 0 -.1*max(pressures) .1*max(pressures)])
+
+subplot(2,1,2)
+plot(timesteps, rates(controls), <span class="string">'-x'</span>)
+title(<span class="string">'Injector rate'</span>);
+ylabel(<span class="string">'stb/day'</span>)
+xlabel(<span class="string">'days'</span>)
+
+<span class="comment">% Adjust the axis a bit</span>
+axis(axis() + [0 0 -.1*max(rates) .1*max(rates)])
+</pre><pre class="codeoutput">
+inj = 
+
+    'INJECTOR'    'WATER'    'OPEN'    'RATE'    [0.0012]    [Inf]    [NaN]    [Inf]    [0]    [0]
+    'INJECTOR'    'WATER'    'OPEN'    'RATE'    [0.0023]    [Inf]    [NaN]    [Inf]    [0]    [0]
+    'INJECTOR'    'WATER'    'OPEN'    'RATE'    [0.0012]    [Inf]    [NaN]    [Inf]    [0]    [0]
+
+
+prod = 
+
+    'PRODUCER'    'OPEN'    'BHP'    [Inf]    [Inf]    [Inf]    [Inf]    [Inf]    [15000000]    [0]    [0]    [0]
+    'PRODUCER'    'OPEN'    'BHP'    [Inf]    [Inf]    [Inf]    [Inf]    [Inf]    [15000000]    [0]    [0]    [0]
+    'PRODUCER'    'OPEN'    'BHP'    [Inf]    [Inf]    [Inf]    [Inf]    [Inf]    [11000000]    [0]    [0]    [0]
+
+</pre><img vspace="5" hspace="5" src="OilWaterAdjointExample_02.png" alt=""> <h2>Visualize fluid properties (B)<a name="4"></a></h2><p>B_O and B_W relate surface volumes of the fluids to reservoir conditions. Since we are not dealing with a gas phase, the volume ratio between surface and reservoir conditions is not very significant.</p><pre class="codeinput">p = 0.1*barsa:10*milli*barsa:1*barsa;
+
+clf;
+subplot(2,1,1)
+plot(p, fluid.BW(p))
+title(<span class="string">'B_W'</span>)
+xlabel(<span class="string">'Pressure (Pascal)'</span>)
+
+subplot(2,1,2)
+plot(p, fluid.BO(p))
+title(<span class="string">'B_O'</span>)
+xlabel(<span class="string">'Pressure (Pascal)'</span>)
+</pre><img vspace="5" hspace="5" src="OilWaterAdjointExample_03.png" alt=""> <h2>Compute constants<a name="5"></a></h2><p>Once we are happy with the grid and rock setup, we compute transmissibilities. For this we first need the centroids.</p><pre class="codeinput">G = computeGeometry(G);
+T = computeTrans(G, rock);
+</pre><h2>Set up reservoir<a name="6"></a></h2><p>We turn on gravity and set up reservoir and scaling factors.</p><pre class="codeinput">gravity <span class="string">on</span>
+
+state = initResSol(G, deck.PROPS.PVCDO(1), [.15, .85]);
+
+scalFacs.pressure = 100*barsa;
+scalFacs.rate     = 100/day;
+</pre><h2>Run the whole schedule<a name="7"></a></h2><p>This is done to get values for the wells for all timesteps. Since the case is fairly small,</p><pre class="codeinput">timer = tic;
+system = initADISystem({<span class="string">'Oil'</span>, <span class="string">'Water'</span>}, G, rock, fluid);
+[wellSols states] = runScheduleADI(state, G, rock, system, schedule);
+t_forward = toc(timer);
+</pre><pre class="codeoutput">Step    1 of   10 (Used   7 iterations)
+Step    2 of   10 (Used   4 iterations)
+Step    3 of   10 (Used   5 iterations)
+Step    4 of   10 (Used   4 iterations)
+Step    5 of   10 (Used   4 iterations)
+Step    6 of   10 (Used   4 iterations)
+Step    7 of   10 (Used   5 iterations)
+Step    8 of   10 (Used   5 iterations)
+Step    9 of   10 (Used   4 iterations)
+Step   10 of   10 (Used   5 iterations)
+</pre><h2>Create objective functions<a name="8"></a></h2><p>We can then create objective functions, which are here net profit worth. Since the adjoint formulation uses one forward run (runScheduleOW) to get the values for the objective function and one backward run (runAdjointOW) to get the gradients, we create an objective function based on the earlier solution. Since we will compare with the more computationally intensive numerical gradient, we also define an objective function which will be used for approximating the gradient of the objective function in a difference scheme.</p><pre class="codeinput">objective_adjoint = @(tstep)NPVOW(G, wellSols, schedule, <span class="string">'ComputePartials'</span>, true, <span class="string">'tStep'</span>, tstep);
+objective_numerical = @(wellSols)NPVOW(G, wellSols, schedule);
+</pre><h2>Compute derivatives using the adjoint formulation<a name="9"></a></h2><p>We pass in the objective function of the previous run. The objective function had a cost equal to one simulation for each timestep. The backward simulation requires one simulation per timestep, for a total of two simulations per timestep in the schedule to find the gradient. Note that the reverse timesteps are much cheaper to compute because only one iteration is required per timestep since the system is linear. Because the setup in this example is relatively small, we store the states in memory and input them as a keyword argument. If the forward simulation would be too big to store in full in memory, it can be saved to disk by running runScheduleOW with the 'writeOutput' parameter set to true. runAdjointOW will then read the files if not supplied with forward simulations directly. ('ForwardStates' not supplied or empty)</p><pre class="codeinput">timer = tic;
+getEquations = @eqsfiOWExplicitWells;
+adjointGradient = runAdjointADI(G, rock, fluid, schedule, objective_adjoint, system,  <span class="string">'Verbose'</span>, verbose, <span class="string">'ForwardStates'</span>, states);
+t_adjoint = toc(timer);
+</pre><h2>Find gradients numerically<a name="10"></a></h2><p>To find the numerical gradients we need to solve each timestep three times: Once for the baseline value in the actual timestep, and once for each of the two wells to compute the derivative of the objective function based on that well.</p><pre class="codeinput">timer = tic;
+numericalGradient = computeNumGrad(state, G, rock, system, schedule, objective_numerical, <span class="string">'scaling'</span>, scalFacs, <span class="string">'Verbose'</span>, verbose);
+t_gradient = toc(timer);
+</pre><pre class="codeoutput">Step    1 of   10 (Used   7 iterations)
+Step    2 of   10 (Used   4 iterations)
+Step    3 of   10 (Used   5 iterations)
+Step    4 of   10 (Used   4 iterations)
+Step    5 of   10 (Used   4 iterations)
+Step    6 of   10 (Used   4 iterations)
+Step    7 of   10 (Used   5 iterations)
+Step    8 of   10 (Used   5 iterations)
+Step    9 of   10 (Used   4 iterations)
+Step   10 of   10 (Used   5 iterations)
+Step    1 of   10 (Used   7 iterations)
+Step    2 of   10 (Used   4 iterations)
+Step    3 of   10 (Used   5 iterations)
+Step    4 of   10 (Used   4 iterations)
+Step    5 of   10 (Used   4 iterations)
+Step    6 of   10 (Used   4 iterations)
+Step    7 of   10 (Used   5 iterations)
+Step    8 of   10 (Used   5 iterations)
+Step    9 of   10 (Used   4 iterations)
+Step   10 of   10 (Used   5 iterations)
+Step    1 of   10 (Used   7 iterations)
+Step    2 of   10 (Used   4 iterations)
+Step    3 of   10 (Used   5 iterations)
+Step    4 of   10 (Used   4 iterations)
+Step    5 of   10 (Used   4 iterations)
+Step    6 of   10 (Used   4 iterations)
+Step    7 of   10 (Used   5 iterations)
+Step    8 of   10 (Used   5 iterations)
+Step    9 of   10 (Used   4 iterations)
+Step   10 of   10 (Used   5 iterations)
+Step    1 of   10 (Used   7 iterations)
+Step    2 of   10 (Used   4 iterations)
+Step    3 of   10 (Used   5 iterations)
+Step    4 of   10 (Used   4 iterations)
+Step    5 of   10 (Used   4 iterations)
+Step    6 of   10 (Used   4 iterations)
+Step    7 of   10 (Used   5 iterations)
+Step    8 of   10 (Used   5 iterations)
+Step    9 of   10 (Used   4 iterations)
+Step   10 of   10 (Used   5 iterations)
+Step    1 of   10 (Used   7 iterations)
+Step    2 of   10 (Used   4 iterations)
+Step    3 of   10 (Used   5 iterations)
+Step    4 of   10 (Used   4 iterations)
+Step    5 of   10 (Used   4 iterations)
+Step    6 of   10 (Used   4 iterations)
+Step    7 of   10 (Used   5 iterations)
+Step    8 of   10 (Used   5 iterations)
+Step    9 of   10 (Used   4 iterations)
+Step   10 of   10 (Used   5 iterations)
+Step    1 of   10 (Used   7 iterations)
+Step    2 of   10 (Used   4 iterations)
+Step    3 of   10 (Used   5 iterations)
+Step    4 of   10 (Used   4 iterations)
+Step    5 of   10 (Used   4 iterations)
+Step    6 of   10 (Used   4 iterations)
+Step    7 of   10 (Used   5 iterations)
+Step    8 of   10 (Used   5 iterations)
+Step    9 of   10 (Used   4 iterations)
+Step   10 of   10 (Used   5 iterations)
+Step    1 of   10 (Used   7 iterations)
+Step    2 of   10 (Used   4 iterations)
+Step    3 of   10 (Used   5 iterations)
+Step    4 of   10 (Used   4 iterations)
+Step    5 of   10 (Used   4 iterations)
+Step    6 of   10 (Used   4 iterations)
+Step    7 of   10 (Used   5 iterations)
+Step    8 of   10 (Used   5 iterations)
+Step    9 of   10 (Used   4 iterations)
+Step   10 of   10 (Used   5 iterations)
+</pre><h2>Plot the gradients<a name="11"></a></h2><p>We find the gradient for each well and for each unique well setup in the schedule. There are three distinct well setups in the current schedule. The gradients are plotted per well with data points corresponding to the unique schedules, showing that they are visually indistinguishable.</p><pre class="codeinput">wellNames = {wellSols{1}.name};
+
+ga = cell2mat(adjointGradient);
+gn = cell2mat(numericalGradient);
+clf;
+subplot(1,2,1)
+plot(ga(1,:),<span class="string">'-ob'</span>), hold <span class="string">on</span>
+plot(gn(1,:),<span class="string">'-xr'</span>)
+title([<span class="string">'Well 1 ('</span>, wellNames{1}, <span class="string">')'</span>])
+xlabel(<span class="string">'Control #'</span>)
+
+subplot(1,2,2)
+plot(ga(2,:),<span class="string">'-ob'</span>), hold <span class="string">on</span>
+plot(gn(2,:),<span class="string">'-xr'</span>), hold <span class="string">on</span>
+title([<span class="string">'Well 2 ('</span>, wellNames{2}, <span class="string">')'</span>])
+xlabel(<span class="string">'Control #'</span>)
+legend({<span class="string">'Adjoint'</span>, <span class="string">'Numerical'</span>})
+</pre><img vspace="5" hspace="5" src="OilWaterAdjointExample_04.png" alt=""> <h2>Plot the time taken<a name="12"></a></h2><p>Since the adjoint formulation uses both a forward and a backward simulation, these must be plotted together.</p><pre class="codeinput">clf;
+bar([t_forward, t_adjoint, 0; 0, 0, t_gradient], <span class="string">'barlayout'</span>, <span class="string">'stacked'</span>);
+set(gca, <span class="string">'XTickLabel'</span>, {<span class="string">'Adjoint'</span>, <span class="string">'Numerical'</span>})
+legend(<span class="string">'Adjoint (Forward)'</span>, <span class="string">'Adjoint (Backwards)'</span>, <span class="string">'Numerical'</span>, <span class="string">'location'</span>, <span class="string">'NorthOutside'</span>)
+ylabel(<span class="string">'t (seconds)'</span>)
+title(<span class="string">'Time used'</span>)
+</pre><img vspace="5" hspace="5" src="OilWaterAdjointExample_05.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Read the problem from a deckfile
+% The problem is defined in 'INPUT_NUMGRAD.DATA' which is a simple
+% $10\times1\times10$ Cartesian grid with uniform permeability. We read the
+% deck and create the grid, rock and fluid structures from the resulting
+% output. This requires the deckformat module.
+require deckformat
+
+current_dir = fileparts(mfilename('fullpath'));
+fn    = fullfile(current_dir, 'simple10x1x10.data');
+deck = readEclipseDeck(fn);
+
+% Convert to MRST units (SI)
+deck = convertDeckUnits(deck);
+
+% Create grid
+G = initEclipseGrid(deck);
+
+% Set up the rock structure
+rock  = initEclipseRock(deck);
+rock  = compressRock(rock, G.cells.indexMap);
+
+% Create fluid
+fluid = initDeckADIFluid(deck);
+
+% Get schedule
+schedule = deck.SCHEDULE;
+
+% Enable this to get convergence reports when solving schedules
+verbose = false;
+
+%% Visualize the fluid properties (Relative permeability)
+% While the geometry is trivial, we can examine the fluid properties. We do
+% this by creating a vector containing the whole range of saturation values
+% and sampling the functions contained in the fluid object.
+s = 0:0.05:1;
+clf;
+subplot(2,1,1)
+plot(s, fluid.krW(s))
+title('kr_w')
+
+subplot(2,1,2)
+plot(s, fluid.krOW(s))
+title('kr_{ow}')
+
+%% Show the schedules
+% There are three different well setups in the schedule. We are interested
+% in the gradient based on these wells. We convert the timesteps to days to
+% get better plots and visualize the controls for all the timesteps to show
+% timescales.
+inj = vertcat(schedule.control.WCONINJE) %#ok intentional display
+prod = vertcat(schedule.control.WCONPROD) %#ok intentional display
+timesteps = convertTo(cumsum(schedule.step.val), day);
+controls  = schedule.step.control;
+
+% Extract rates and pressures
+rates     = convertTo([inj{:, 5}], stb/day);
+pressures = convertTo([prod{:, 9}], milli*barsa);
+
+% Plot pressures and rates in each timestep.
+clf;
+subplot(2,1,1)
+plot(timesteps, pressures(controls), '-x')
+title('Producer BHP');
+ylabel('millibar')
+xlabel('days')
+axis(axis() + [0 0 -.1*max(pressures) .1*max(pressures)])
+
+subplot(2,1,2)
+plot(timesteps, rates(controls), '-x')
+title('Injector rate');
+ylabel('stb/day')
+xlabel('days')
+
+% Adjust the axis a bit
+axis(axis() + [0 0 -.1*max(rates) .1*max(rates)])
+
+%% Visualize fluid properties (B)
+% B_O and B_W relate surface volumes of the fluids to reservoir conditions.
+% Since we are not dealing with a gas phase, the volume ratio between
+% surface and reservoir conditions is not very significant.
+p = 0.1*barsa:10*milli*barsa:1*barsa;
+
+clf;
+subplot(2,1,1)
+plot(p, fluid.BW(p))
+title('B_W')
+xlabel('Pressure (Pascal)')
+
+subplot(2,1,2)
+plot(p, fluid.BO(p))
+title('B_O')
+xlabel('Pressure (Pascal)')
+
+%% Compute constants
+% Once we are happy with the grid and rock setup, we compute
+% transmissibilities. For this we first need the centroids.
+G = computeGeometry(G);
+T = computeTrans(G, rock);
+
+%% Set up reservoir
+% We turn on gravity and set up reservoir and scaling factors.
+gravity on
+
+state = initResSol(G, deck.PROPS.PVCDO(1), [.15, .85]);
+
+scalFacs.pressure = 100*barsa;
+scalFacs.rate     = 100/day;
+%% Run the whole schedule
+% This is done to get values for the wells for all timesteps. Since the
+% case is fairly small, 
+timer = tic;
+system = initADISystem({'Oil', 'Water'}, G, rock, fluid);
+[wellSols states] = runScheduleADI(state, G, rock, system, schedule);
+t_forward = toc(timer);
+
+%% Create objective functions
+% We can then create objective functions, which are here net profit worth.
+% Since the adjoint formulation uses one forward run (runScheduleOW) to get
+% the values for the objective function and one backward run (runAdjointOW)
+% to get the gradients, we create an objective function based on the earlier
+% solution. Since we will compare with the more computationally intensive
+% numerical gradient, we also define an objective function which will be
+% used for approximating the gradient of the objective function in a
+% difference scheme.
+
+objective_adjoint = @(tstep)NPVOW(G, wellSols, schedule, 'ComputePartials', true, 'tStep', tstep);
+objective_numerical = @(wellSols)NPVOW(G, wellSols, schedule);
+
+%% Compute derivatives using the adjoint formulation
+% We pass in the objective function of the previous run. The objective
+% function had a cost equal to one simulation for each timestep. The
+% backward simulation requires one simulation per timestep, for a total of
+% two simulations per timestep in the schedule to find the gradient. Note
+% that the reverse timesteps are much cheaper to compute because only one
+% iteration is required per timestep since the system is linear. Because
+% the setup in this example is relatively small, we store the states in
+% memory and input them as a keyword argument. If the forward simulation
+% would be too big to store in full in memory, it can be saved to disk by
+% running runScheduleOW with the 'writeOutput' parameter set to true.
+% runAdjointOW will then read the files if not supplied with forward
+% simulations directly. ('ForwardStates' not supplied or empty)
+timer = tic;
+getEquations = @eqsfiOWExplicitWells;
+adjointGradient = runAdjointADI(G, rock, fluid, schedule, objective_adjoint, system,  'Verbose', verbose, 'ForwardStates', states);
+t_adjoint = toc(timer);
+
+%% Find gradients numerically
+% To find the numerical gradients we need to solve each timestep three
+% times: Once for the baseline value in the actual timestep, and once for
+% each of the two wells to compute the derivative of the objective function
+% based on that well.
+timer = tic;
+numericalGradient = computeNumGrad(state, G, rock, system, schedule, objective_numerical, 'scaling', scalFacs, 'Verbose', verbose);
+t_gradient = toc(timer);
+
+%% Plot the gradients
+% We find the gradient for each well and for each unique well setup in the
+% schedule. There are three distinct well setups in the current schedule.
+% The gradients are plotted per well with data points corresponding to the
+% unique schedules, showing that they are visually indistinguishable. 
+
+wellNames = {wellSols{1}.name};
+
+ga = cell2mat(adjointGradient);
+gn = cell2mat(numericalGradient);
+clf;
+subplot(1,2,1)
+plot(ga(1,:),'-ob'), hold on
+plot(gn(1,:),'-xr')
+title(['Well 1 (', wellNames{1}, ')'])
+xlabel('Control #')
+
+subplot(1,2,2)
+plot(ga(2,:),'-ob'), hold on
+plot(gn(2,:),'-xr'), hold on
+title(['Well 2 (', wellNames{2}, ')'])
+xlabel('Control #')
+legend({'Adjoint', 'Numerical'})
+
+%% Plot the time taken
+% Since the adjoint formulation uses both a forward and a backward
+% simulation, these must be plotted together.
+clf;
+bar([t_forward, t_adjoint, 0; 0, 0, t_gradient], 'barlayout', 'stacked');
+set(gca, 'XTickLabel', {'Adjoint', 'Numerical'})
+legend('Adjoint (Forward)', 'Adjoint (Backwards)', 'Numerical', 'location', 'NorthOutside')
+ylabel('t (seconds)')
+title('Time used')
+
+
+##### SOURCE END #####
+--></body></html>

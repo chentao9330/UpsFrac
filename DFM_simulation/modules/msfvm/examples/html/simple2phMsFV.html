@@ -1,0 +1,308 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>simple2phMsFV</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simple2phMsFV.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">A simple two phase problem solved using the Multiscale Finite Volume method</a></li><li><a href="#2">Construct simple 2D Cartesian test case</a></li><li><a href="#3">Generate dual grid</a></li><li><a href="#4">Visualize</a></li><li><a href="#5">Uniform permeability</a></li><li><a href="#6">Define a simple 2 phase fluid</a></li><li><a href="#7">Setup a producer / injector pair of wells</a></li><li><a href="#8">Set up solution structures with only one phase</a></li><li><a href="#9">Set up pressure and transport solvers</a></li><li><a href="#11">Solve initial pressure in reservoir</a></li><li><a href="#12">Transport loop</a></li><li><a href="#13">Start the main loop</a></li></ul></div><h2>A simple two phase problem solved using the Multiscale Finite Volume method<a name="1"></a></h2><p>The multiscale finite volume method can easily be used in place of a regular pressure solver for incompressible transport. This example demonstrates a two phase solver on a 2D grid.</p><pre class="codeinput">mrstModule <span class="string">add</span> <span class="string">coarsegrid</span> <span class="string">msfvm</span>
+</pre><h2>Construct simple 2D Cartesian test case<a name="2"></a></h2><pre class="codeinput">nx = 50; ny = 50;
+Nx = 5; Ny = 5;
+G         = cartGrid([nx ny]);
+G         = computeGeometry(G);
+
+<span class="comment">% Plot each timestep</span>
+doPlot = true;
+
+p  = partitionUI(G, [Nx, Ny]);
+CG = generateCoarseGrid(G, p);
+</pre><h2>Generate dual grid<a name="3"></a></h2><pre class="codeinput">DG = partitionUIdual(CG, [Nx, Ny]);
+</pre><h2>Visualize<a name="4"></a></h2><pre class="codeinput">clf;
+plotDual(G, DG)
+</pre><img vspace="5" hspace="5" src="simple2phMsFV_01.png" alt=""> <h2>Uniform permeability<a name="5"></a></h2><pre class="codeinput">rock.perm = repmat(100*milli*darcy, [G.cells.num, 1]);
+rock.poro = repmat(0.3            , [G.cells.num, 1]);
+
+T = computeTrans(G, rock);
+</pre><h2>Define a simple 2 phase fluid<a name="6"></a></h2><pre class="codeinput">fluid = initSimpleFluid(<span class="string">'mu'</span> , [   1,  10]*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, [1014, 859]*kilogram/meter^3, <span class="keyword">...</span>
+                            <span class="string">'n'</span>  , [   2,   2]);
+</pre><h2>Setup a producer / injector pair of wells<a name="7"></a></h2><pre class="codeinput">rate = 10*meter^3/day;
+bhp  = 1*barsa;
+radius = 0.05;
+<span class="comment">% Injector in lower left corner</span>
+W = addWell([], G, rock, round(nx/8) + nx*round(ny/8),      <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'rate'</span> , <span class="string">'Val'</span>, rate, <span class="keyword">...</span>
+            <span class="string">'Radius'</span>, radius, <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="keyword">...</span>
+            <span class="string">'Comp_i'</span>, [1, 0]);
+<span class="comment">% Producer in upper right corner</span>
+W = addWell(W, G, rock, round(7*nx/8) + nx*round(7*ny/8),      <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>, bhp, <span class="keyword">...</span>
+            <span class="string">'Radius'</span>, radius, <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="keyword">...</span>
+            <span class="string">'Comp_i'</span>, [0, 1]);
+</pre><h2>Set up solution structures with only one phase<a name="8"></a></h2><pre class="codeinput">refSol    = initState(G, W, 0, [0, 1]);
+msSol     = initState(G, W, 0, [0, 1]);
+
+gravity <span class="string">off</span>
+verbose = false;
+</pre><h2>Set up pressure and transport solvers<a name="9"></a></h2><p>We</p><pre class="codeinput"><span class="comment">% Reference TPFA</span>
+r_psolve = @(state) incompTPFA(state, G, T, fluid, <span class="string">'wells'</span>, W);
+<span class="comment">% MsFV using a few iterations to improve flux error</span>
+psolve   = @(state) solveMSFV_TPFA_Incomp(state, G, CG, T, fluid, <span class="keyword">...</span>
+                                                 <span class="string">'Reconstruct'</span>, true, <span class="string">'Dual'</span>, DG, <span class="string">'wells'</span>, W,<span class="keyword">...</span>
+                                                 <span class="string">'Update'</span>, true, <span class="string">'Iterations'</span>, 5, <span class="string">'Iterator'</span>, <span class="string">'msfvm'</span>,<span class="keyword">...</span>
+                                                 <span class="string">'Subiterations'</span>, 10, <span class="string">'Smoother'</span>, <span class="string">'dms'</span>, <span class="string">'Omega'</span>, 1);
+<span class="comment">% Implicit transport solver</span>
+tsolve   = @(state, dT) implicitTransport(state, G, dT, rock, <span class="keyword">...</span>
+                                                fluid, <span class="string">'wells'</span>, W, <span class="keyword">...</span>
+                                                <span class="string">'verbose'</span>, verbose);
+</pre><p>Alternatively we could have defined an explicit transport solver by</p><p>tsolve = @(state, dT, fluid) explicitTransport(state, G, dT, rock, fluid, ...                                        'wells', W, 'verbose', verbose);</p><h2>Solve initial pressure in reservoir<a name="11"></a></h2><p>We solve and plot the pressure in the reservoir at t=0.</p><pre class="codeinput">refSol= r_psolve(refSol);
+msSol = psolve(msSol);
+subplot(2,1,1)
+plotCellData(G, refSol.pressure); axis <span class="string">tight</span>; colorbar;
+title(<span class="string">'Pressure Ref'</span>)
+cbar = caxis();
+subplot(2,1,2)
+plotCellData(G, msSol.pressure); axis <span class="string">tight</span>; colorbar;
+title(<span class="string">'Pressure MS'</span>)
+caxis(cbar)
+</pre><img vspace="5" hspace="5" src="simple2phMsFV_02.png" alt=""> <h2>Transport loop<a name="12"></a></h2><p>We solve the two-phase system using a sequential splitting in which the pressure and fluxes are computed by solving the flow equation and then held fixed as the saturation is advanced according to the transport equation.</p><pre class="codeinput">T      = 20*day();
+dT     = T/60;
+</pre><h2>Start the main loop<a name="13"></a></h2><p>Iterate through the time steps and plot the saturation profiles along the way.</p><pre class="codeinput">t = 0;
+<span class="keyword">while</span> t &lt; T,
+    <span class="comment">% Solve transport equations using the transport solver</span>
+    msSol  = tsolve(msSol , dT);
+    refSol = tsolve(refSol, dT);
+
+    <span class="comment">% Update the pressure based on the new saturations</span>
+    msSol    = psolve(msSol);
+    refSol   = r_psolve(refSol);
+    <span class="comment">% Increase time and continue if we do not want to plot saturations</span>
+    <span class="keyword">if</span> doPlot
+        clf;
+        <span class="comment">% Saturation plot</span>
+        subplot(2,2,1)
+        plotGrid(G, <span class="string">'FaceColor'</span>, <span class="string">'None'</span>, <span class="string">'EdgeAlpha'</span>, 0)
+        plotCellData(G, refSol.s(:,1), refSol.s(:,1) &gt; 1e-4); axis <span class="string">tight</span>; colorbar;
+        title(<span class="string">'Saturation Ref'</span>)
+        caxis([0 1]);
+        subplot(2,2,2)
+        plotGrid(G, <span class="string">'FaceColor'</span>, <span class="string">'None'</span>, <span class="string">'EdgeAlpha'</span>, 0)
+        plotCellData(G, msSol.s(:,1), msSol.s(:,1) &gt; 1e-4); axis <span class="string">tight</span>; colorbar;
+        title(<span class="string">'Saturation MSFV'</span>)
+        <span class="comment">% Align colorbars</span>
+        caxis([0 1])
+        <span class="comment">% Pressure plot</span>
+        subplot(2,2,3)
+        plotCellData(G, refSol.pressure); axis <span class="string">tight</span>; colorbar;
+        title(<span class="string">'Pressure Ref'</span>)
+        cbar = caxis();
+        subplot(2,2,4)
+        hs = plotCellData(G, msSol.pressure); axis <span class="string">tight</span>; colorbar;
+        title(<span class="string">'Pressure MSFV'</span>)
+        caxis(cbar)
+        drawnow
+    <span class="keyword">end</span>
+    t = t + dT;
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="simple2phMsFV_03.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% A simple two phase problem solved using the Multiscale Finite Volume method
+% The multiscale finite volume method can easily be used in place of a
+% regular pressure solver for incompressible transport. This example
+% demonstrates a two phase solver on a 2D grid.
+
+mrstModule add coarsegrid msfvm
+%% Construct simple 2D Cartesian test case
+nx = 50; ny = 50;
+Nx = 5; Ny = 5;
+G         = cartGrid([nx ny]);
+G         = computeGeometry(G);
+
+% Plot each timestep
+doPlot = true;
+
+p  = partitionUI(G, [Nx, Ny]);
+CG = generateCoarseGrid(G, p);
+%% Generate dual grid
+DG = partitionUIdual(CG, [Nx, Ny]);
+
+%% Visualize
+clf;
+plotDual(G, DG)
+%% Uniform permeability
+rock.perm = repmat(100*milli*darcy, [G.cells.num, 1]);
+rock.poro = repmat(0.3            , [G.cells.num, 1]);
+
+T = computeTrans(G, rock);
+
+%% Define a simple 2 phase fluid
+fluid = initSimpleFluid('mu' , [   1,  10]*centi*poise     , ...
+                            'rho', [1014, 859]*kilogram/meter^3, ...
+                            'n'  , [   2,   2]);    
+
+
+%% Setup a producer / injector pair of wells
+rate = 10*meter^3/day;
+bhp  = 1*barsa;
+radius = 0.05;
+% Injector in lower left corner
+W = addWell([], G, rock, round(nx/8) + nx*round(ny/8),      ...
+            'Type', 'rate' , 'Val', rate, ...
+            'Radius', radius, 'InnerProduct', 'ip_tpf', ...
+            'Comp_i', [1, 0]);
+% Producer in upper right corner
+W = addWell(W, G, rock, round(7*nx/8) + nx*round(7*ny/8),      ...
+            'Type', 'bhp' , 'Val', bhp, ...
+            'Radius', radius, 'InnerProduct', 'ip_tpf', ...
+            'Comp_i', [0, 1]);
+        
+        
+%% Set up solution structures with only one phase
+refSol    = initState(G, W, 0, [0, 1]);
+msSol     = initState(G, W, 0, [0, 1]);
+
+gravity off
+verbose = false;
+
+%% Set up pressure and transport solvers
+% We 
+
+% Reference TPFA
+r_psolve = @(state) incompTPFA(state, G, T, fluid, 'wells', W);
+% MsFV using a few iterations to improve flux error
+psolve   = @(state) solveMSFV_TPFA_Incomp(state, G, CG, T, fluid, ...
+                                                 'Reconstruct', true, 'Dual', DG, 'wells', W,...
+                                                 'Update', true, 'Iterations', 5, 'Iterator', 'msfvm',...
+                                                 'Subiterations', 10, 'Smoother', 'dms', 'Omega', 1);
+% Implicit transport solver
+tsolve   = @(state, dT) implicitTransport(state, G, dT, rock, ...
+                                                fluid, 'wells', W, ...
+                                                'verbose', verbose);
+%%
+% Alternatively we could have defined an explicit transport solver by
+% 
+% tsolve = @(state, dT, fluid) explicitTransport(state, G, dT, rock, fluid, ...
+%                                        'wells', W, 'verbose', verbose); 
+
+%% Solve initial pressure in reservoir
+% We solve and plot the pressure in the reservoir at t=0.
+refSol= r_psolve(refSol);
+msSol = psolve(msSol);
+subplot(2,1,1)
+plotCellData(G, refSol.pressure); axis tight; colorbar;
+title('Pressure Ref')
+cbar = caxis();
+subplot(2,1,2)
+plotCellData(G, msSol.pressure); axis tight; colorbar; 
+title('Pressure MS')
+caxis(cbar)
+
+%% Transport loop
+% We solve the two-phase system using a sequential splitting in which the
+% pressure and fluxes are computed by solving the flow equation and then
+% held fixed as the saturation is advanced according to the transport
+% equation. 
+T      = 20*day();
+dT     = T/60;
+
+%% Start the main loop
+% Iterate through the time steps and plot the saturation profiles along the
+% way.
+t = 0;
+while t < T,
+    % Solve transport equations using the transport solver
+    msSol  = tsolve(msSol , dT);
+    refSol = tsolve(refSol, dT);
+    
+    % Update the pressure based on the new saturations
+    msSol    = psolve(msSol);
+    refSol   = r_psolve(refSol);
+    % Increase time and continue if we do not want to plot saturations
+    if doPlot
+        clf;
+        % Saturation plot
+        subplot(2,2,1)
+        plotGrid(G, 'FaceColor', 'None', 'EdgeAlpha', 0)
+        plotCellData(G, refSol.s(:,1), refSol.s(:,1) > 1e-4); axis tight; colorbar;
+        title('Saturation Ref')
+        caxis([0 1]);
+        subplot(2,2,2)
+        plotGrid(G, 'FaceColor', 'None', 'EdgeAlpha', 0)
+        plotCellData(G, msSol.s(:,1), msSol.s(:,1) > 1e-4); axis tight; colorbar;
+        title('Saturation MSFV')
+        % Align colorbars
+        caxis([0 1])
+        % Pressure plot
+        subplot(2,2,3)
+        plotCellData(G, refSol.pressure); axis tight; colorbar;
+        title('Pressure Ref')
+        cbar = caxis();
+        subplot(2,2,4)
+        hs = plotCellData(G, msSol.pressure); axis tight; colorbar;
+        title('Pressure MSFV')
+        caxis(cbar)
+        drawnow
+    end
+    t = t + dT;
+end
+
+##### SOURCE END #####
+--></body></html>

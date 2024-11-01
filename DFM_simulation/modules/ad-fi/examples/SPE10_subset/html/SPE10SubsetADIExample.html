@@ -1,0 +1,300 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>SPE10SubsetADIExample</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="SPE10SubsetADIExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Simulate a large example using parts of SPE10</a></li><li><a href="#2">Set up permeability, grid and wells</a></li><li><a href="#3">Plot the permeability</a></li><li><a href="#4">Set up solution structures.</a></li><li><a href="#5">Simulate 1000 days of production and save iteration count and time</a></li><li><a href="#6">Plot the solution</a></li><li><a href="#7">Plot the time taken and number of iterations</a></li></ul></div><h2>Simulate a large example using parts of SPE10<a name="1"></a></h2><p>This example is a larger example demonstrating the solver on a medium size grid (66000 cells) with a relatively large amount of time steps (100). This example will take some time, especially if mldivide is used as the elliptic solver. Be vary that increasing the number of layers may let the simulations take a very long time.</p><pre class="codeinput">mrstModule <span class="string">add</span> <span class="string">ad-fi</span> <span class="string">deckformat</span> <span class="string">spe10</span>
+
+<span class="comment">% Read and process file.</span>
+current_dir = fileparts(mfilename(<span class="string">'fullpath'</span>));
+fn    = fullfile(current_dir, <span class="string">'SPE10-S3.DATA.txt'</span>);
+
+deck = readEclipseDeck(fn);
+
+<span class="comment">% The deck is given in field units, MRST uses metric.</span>
+deck = convertDeckUnits(deck);
+
+
+<span class="comment">% Create a special ADI fluid which can produce differentiated fluid</span>
+<span class="comment">% properties.</span>
+fluid = initDeckADIFluid(deck);
+
+<span class="comment">% The case includes gravity</span>
+gravity <span class="string">on</span>
+
+
+<span class="comment">% The initial state is provided as a binary file. The initial state</span>
+<span class="comment">% contains a uniform mixture of water (.12) and oil (.88).</span>
+<span class="comment">% load initialState;</span>
+</pre><h2>Set up permeability, grid and wells<a name="2"></a></h2><p>We will simulate on the top 5 layers.</p><pre class="codeinput">layers = 1:5;
+
+[G, W, rock] = SPE10_setup(layers);
+
+
+<span class="comment">% SPE10 contains zero and extremely low porosities. For the purpose of this</span>
+<span class="comment">% tutorial, we will mask away these values. An alternative would be to set</span>
+<span class="comment">% these cells to inactive by using extractSubgrid and removing the</span>
+<span class="comment">% corresponding cells.</span>
+low = 1e-4;
+rock.poro(rock.poro &lt; low) = low;
+</pre><h2>Plot the permeability<a name="3"></a></h2><pre class="codeinput">clf;
+plotCellData(G, log10(rock.perm(:,1)));
+</pre><img vspace="5" hspace="5" src="SPE10SubsetADIExample_01.png" alt=""> <h2>Set up solution structures.<a name="4"></a></h2><pre class="codeinput"><span class="comment">% The initial reservoir is at 6000 psi and is fully oil saturated. The well</span>
+<span class="comment">% solution gets its initial pressure from the bottom hole pressure values</span>
+<span class="comment">% provided.</span>
+initSat = [0 1 0];
+state0 = initResSol(G, 6000*psia, initSat);
+state0.wellSol = initWellSolLocal(W, 6000*psia);
+
+<span class="keyword">for</span> i = 1:numel(W)
+    state0.wellSol(i).pressure = W(i).val;
+    <span class="comment">% Set well sign</span>
+    <span class="keyword">if</span> strcmpi(W(i).name(1), <span class="string">'p'</span>)
+        W(i).sign = -1;
+    <span class="keyword">else</span>
+        W(i).sign = 1;
+    <span class="keyword">end</span>
+<span class="keyword">end</span>
+
+<span class="comment">% Set up a Water / Oil system using CPR preconditioner. Alternatively we</span>
+<span class="comment">% could have used a specialized elliptic solver using the option 'cprEllipticSolver'</span>
+<span class="comment">% to exploit the nature of the variables involving pressure.</span>
+
+system = initADISystem({<span class="string">'Water'</span>, <span class="string">'Oil'</span>}, G, rock, fluid, <span class="string">'cpr'</span>, true, <span class="string">'cprRelTol'</span>, 2e-2);
+<span class="comment">% If an alternative solver for the pressure subproblem was installed, it</span>
+<span class="comment">% could be added using</span>
+<span class="comment">%</span>
+<span class="comment">%    system.nonlinear.cprEllipticSolver = @(A,b) solver(A,b)</span>
+<span class="comment">%</span>
+<span class="comment">% This can greatly speed up the solution process, as the default option</span>
+<span class="comment">% uses MATLABs direct solver @mldivide which is very expensive for a</span>
+<span class="comment">% preconditioner.</span>
+</pre><h2>Simulate 1000 days of production and save iteration count and time<a name="5"></a></h2><p>We provide the solver with time steps for roughly 1000 days of production. A few smaller steps are done to get better accuracy during the initial injection period. After this we do 10 day intervals to step rapidly through the schedule. While this converges at every time step, implicit solvers will still get improved accuracy by doing smaller time steps. Numerical diffusion can, for instance, be problematic when doing large time steps.</p><pre class="codeinput">dt = [.001*day; .1*day*ones(5,1); 1*day*ones(10,1); 10*day*ones(100,1)];
+nstep = numel(dt);
+
+states = cell(nstep,1);
+its = zeros(nstep,1);
+time = zeros(nstep,1);
+
+state = state0;
+<span class="keyword">for</span> t = 1 : nstep
+    timer = tic();
+
+    [state, it] = solvefiADI(state, dt(t), W, G, system);
+
+    states{t} = state;
+    its(t) = it;
+    time(t) = toc(timer);
+<span class="keyword">end</span>
+</pre><pre class="codeoutput">Warning: Non-linear solver did not converge, stopped by max iterations... 
+</pre><h2>Plot the solution<a name="6"></a></h2><pre class="codeinput"><span class="keyword">for</span> i = 1:numel(states)
+    clf;
+    data = states{i}.s(:,1);
+    plotGrid(G, data &gt; 0, <span class="string">'facea'</span>, .3, <span class="string">'facec'</span>, <span class="string">'red'</span>, <span class="string">'edgea'</span>, 0);
+    <span class="comment">% Uncomment for slower, but prettier volume plotting</span>
+<span class="comment">%     plotGridVolumes(G, data);</span>
+    plotWell(G, W);
+    plotGrid(G, <span class="string">'facea'</span>, 0, <span class="string">'edgea'</span>, .05);
+    view(-60,  70);
+    axis <span class="string">tight</span> <span class="string">off</span>
+    title([<span class="string">'Water front after '</span> formatTimeRange(sum(dt(1:i)))])
+    pause(.1)
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="SPE10SubsetADIExample_02.png" alt=""> <h2>Plot the time taken and number of iterations<a name="7"></a></h2><pre class="codeinput">clf;
+plot([time, its]);
+legend({<span class="string">'Time (s)'</span>, <span class="string">'Iterations'</span>})
+xlabel(<span class="string">'Step #'</span>)
+title(<span class="string">'Time and iteration count'</span>)
+</pre><img vspace="5" hspace="5" src="SPE10SubsetADIExample_03.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Simulate a large example using parts of SPE10
+% This example is a larger example demonstrating the solver on a medium
+% size grid (66000 cells) with a relatively large amount of time steps
+% (100). This example will take some time, especially if mldivide is used
+% as the elliptic solver. Be vary that increasing the number of layers may
+% let the simulations take a very long time.
+mrstModule add ad-fi deckformat spe10
+
+% Read and process file.
+current_dir = fileparts(mfilename('fullpath'));
+fn    = fullfile(current_dir, 'SPE10-S3.DATA.txt');
+
+deck = readEclipseDeck(fn);
+
+% The deck is given in field units, MRST uses metric.
+deck = convertDeckUnits(deck);
+
+
+% Create a special ADI fluid which can produce differentiated fluid
+% properties.
+fluid = initDeckADIFluid(deck);
+
+% The case includes gravity
+gravity on
+
+
+% The initial state is provided as a binary file. The initial state
+% contains a uniform mixture of water (.12) and oil (.88).
+% load initialState;
+%% Set up permeability, grid and wells
+% We will simulate on the top 5 layers.
+layers = 1:5;
+
+[G, W, rock] = SPE10_setup(layers);
+
+
+% SPE10 contains zero and extremely low porosities. For the purpose of this
+% tutorial, we will mask away these values. An alternative would be to set
+% these cells to inactive by using extractSubgrid and removing the
+% corresponding cells.
+low = 1e-4;
+rock.poro(rock.poro < low) = low;
+
+%% Plot the permeability
+clf;
+plotCellData(G, log10(rock.perm(:,1)));
+
+%% Set up solution structures.
+
+% The initial reservoir is at 6000 psi and is fully oil saturated. The well
+% solution gets its initial pressure from the bottom hole pressure values
+% provided.
+initSat = [0 1 0];
+state0 = initResSol(G, 6000*psia, initSat);
+state0.wellSol = initWellSolLocal(W, 6000*psia);
+
+for i = 1:numel(W)
+    state0.wellSol(i).pressure = W(i).val;
+    % Set well sign
+    if strcmpi(W(i).name(1), 'p')
+        W(i).sign = -1;
+    else
+        W(i).sign = 1;
+    end
+end
+
+% Set up a Water / Oil system using CPR preconditioner. Alternatively we
+% could have used a specialized elliptic solver using the option 'cprEllipticSolver'
+% to exploit the nature of the variables involving pressure.
+
+system = initADISystem({'Water', 'Oil'}, G, rock, fluid, 'cpr', true, 'cprRelTol', 2e-2);
+% If an alternative solver for the pressure subproblem was installed, it
+% could be added using
+%
+%    system.nonlinear.cprEllipticSolver = @(A,b) solver(A,b)
+% 
+% This can greatly speed up the solution process, as the default option
+% uses MATLABs direct solver @mldivide which is very expensive for a
+% preconditioner.
+
+%% Simulate 1000 days of production and save iteration count and time
+% We provide the solver with time steps for roughly 1000 days of
+% production. A few smaller steps are done to get better accuracy during
+% the initial injection period. After this we do 10 day intervals to step
+% rapidly through the schedule. While this converges at every time step,
+% implicit solvers will still get improved accuracy by doing smaller time
+% steps. Numerical diffusion can, for instance, be problematic when doing
+% large time steps.
+
+dt = [.001*day; .1*day*ones(5,1); 1*day*ones(10,1); 10*day*ones(100,1)];
+nstep = numel(dt);
+
+states = cell(nstep,1);
+its = zeros(nstep,1);
+time = zeros(nstep,1);
+
+state = state0;
+for t = 1 : nstep
+    timer = tic();
+
+    [state, it] = solvefiADI(state, dt(t), W, G, system);
+    
+    states{t} = state;
+    its(t) = it;
+    time(t) = toc(timer);
+end
+
+%% Plot the solution
+for i = 1:numel(states)
+    clf;
+    data = states{i}.s(:,1);
+    plotGrid(G, data > 0, 'facea', .3, 'facec', 'red', 'edgea', 0);
+    % Uncomment for slower, but prettier volume plotting
+%     plotGridVolumes(G, data);
+    plotWell(G, W);
+    plotGrid(G, 'facea', 0, 'edgea', .05);
+    view(-60,  70);
+    axis tight off
+    title(['Water front after ' formatTimeRange(sum(dt(1:i)))])
+    pause(.1)
+end
+%% Plot the time taken and number of iterations
+clf;
+plot([time, its]);
+legend({'Time (s)', 'Iterations'})
+xlabel('Step #')
+title('Time and iteration count')
+
+
+##### SOURCE END #####
+--></body></html>

@@ -1,0 +1,338 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>secondTPFA</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="secondTPFA.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Two-Point Flux Approximation Solvers with gravity</a></li><li><a href="#2">Define and process geometry</a></li><li><a href="#3">Set rock and fluid data</a></li><li><a href="#4">Introduce wells</a></li><li><a href="#5">APPROACH 1: Direct/Classic TPFA</a></li><li><a href="#6">APPROACH 2: Mimetic with TPFA-inner product</a></li><li><a href="#8">Report results</a></li><li><a href="#10">Rate controlled wells</a></li><li><a href="#11">APPROACH 1: Direct/Classic TPFA</a></li><li><a href="#12">APPROACH 2: Mimetic with TPFA-inner product</a></li><li><a href="#13">Report results</a></li></ul></div><h2>Two-Point Flux Approximation Solvers with gravity<a name="1"></a></h2><pre class="codeinput">gravity <span class="string">reset</span> <span class="string">on</span>
+</pre><h2>Define and process geometry<a name="2"></a></h2><p>Construct a Cartesian grid of size 10-by-10-by-4 cells, where each cell has dimension 1-by-1-by-1. Because our flow solvers are applicable for general unstructured grids, the Cartesian grid is here represented using an unstructured format in which cells, faces, nodes, etc. are given explicitly.</p><pre class="codeinput">nx = 20; ny = 20; nz = 20;
+G = cartGrid([nx, ny, nz]);
+G = computeGeometry(G, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Computing normals, areas, and centroids...	Elapsed time is 0.019877 seconds.
+Computing cell volumes and centroids...		Elapsed time is 0.634954 seconds.
+</pre><h2>Set rock and fluid data<a name="3"></a></h2><p>The only parameters in the single-phase pressure equation are the permeability <img src="secondTPFA_eq14888.png" alt="$K$">, which here is homogeneous, isotropic and equal 100 mD. The fluid has density 1000 kg/m^3 and viscosity 1 cP.</p><pre class="codeinput">rock.perm = repmat(100 * milli*darcy, [G.cells.num, 1]);
+fluid     = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise, <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+</pre><h2>Introduce wells<a name="4"></a></h2><p>We will include two vertical pressure-controlled wells. The wells are described using a Peacemann model, giving an extra set of (trivial) equations that need to be assembled. We need to specify ('InnerProduct', 'ip_tpf') to get the correct well model for TPFA.</p><pre class="codeinput">cellsWell1 =  1 : nx*ny : nx*ny*nz;
+W = addWell([], G, rock, cellsWell1,          <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span>, <span class="string">'Val'</span>, 2.2049*barsa(), <span class="keyword">...</span>
+            <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="string">'Comp_i'</span>, [1, 0]);
+
+cellsWell2 = nx*ny: nx*ny : nx*ny*nz;
+W = addWell(W, G, rock, cellsWell2,      <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>, 1.0*barsa(), <span class="keyword">...</span>
+            <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="string">'Comp_i'</span>, [0, 1]);
+</pre><h2>APPROACH 1: Direct/Classic TPFA<a name="5"></a></h2><p>Initialize solution structures for reservoir and wells.</p><pre class="codeinput">resSol1 = initState(G, W, 1.0*barsa, [1, 0]);
+
+<span class="comment">% Compute one-sided transmissibilities.</span>
+T = computeTrans(G, rock, <span class="string">'Verbose'</span>, true);
+
+<span class="comment">% Solve linear system construced from T and W to obtain solution for flow</span>
+<span class="comment">% and pressure in the reservoir and the wells. Notice that the TPFA solver</span>
+<span class="comment">% is different from the one used for mimetic systems.</span>
+resSol1 = incompTPFA(resSol1, G, T, fluid, <span class="string">'wells'</span>, W, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Computing one-sided transmissibilities...	Elapsed time is 0.006121 seconds.
+Setting up linear system...			Elapsed time is 0.015100 seconds.
+Solving linear system...			Elapsed time is 0.047124 seconds.
+Computing fluxes, face pressures etc...		Elapsed time is 0.003301 seconds.
+</pre><h2>APPROACH 2: Mimetic with TPFA-inner product<a name="6"></a></h2><p>Initialize solution structures for reservoir and wells.</p><pre class="codeinput">resSol2 = initState(G, W, 0, [1,0]);
+
+<span class="comment">% Compute mimetic innerproduct equivalent to two-point flux for Cartesian</span>
+<span class="comment">% grids.</span>
+IP = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, true, <span class="keyword">...</span>
+                      <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>);
+</pre><pre class="codeoutput">Using inner product: 'ip_tpf'.
+Computing cell inner products ...		Elapsed time is 0.165868 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.007304 seconds.
+</pre><p>Solve mimetic linear hybrid system</p><pre class="codeinput">resSol2 = solveIncompFlow(resSol2, G, IP, fluid, <span class="string">'wells'</span>, W);
+</pre><h2>Report results<a name="8"></a></h2><p>Report pressure drop computed by the two solvers.</p><pre class="codeinput">dp = @(x) convertTo(x.wellSol(1).pressure - <span class="keyword">...</span>
+                    x.wellSol(2).pressure, barsa);
+
+disp([<span class="string">'DeltaP,  direct TPFA: '</span>, num2str(dp(resSol1))])
+disp([<span class="string">'DeltaP, mimetic TPFA: '</span>, num2str(dp(resSol2))])
+</pre><pre class="codeoutput">DeltaP,  direct TPFA: 1.2049
+DeltaP, mimetic TPFA: 1.2049
+</pre><p>Plot the pressure and producer inflow profile</p><pre class="codeinput">clf
+subplot(<span class="string">'Position'</span>, [0.05,0.55,0.4, 0.35])
+   plotCellData(G, convertTo(resSol1.pressure(1:G.cells.num), barsa()));
+   title(<span class="string">'Pressure: direct TPFA with pressure control'</span>)
+   view(45, 25), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+   cax = caxis;
+
+subplot(<span class="string">'Position'</span>, [0.55,0.55,0.4, 0.35])
+   plotCellData(G, convertTo(resSol2.pressure(1:G.cells.num), barsa()));
+   title(<span class="string">'Pressure: mimetic TPFA with pressure control'</span>)
+   view(45, 25), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+   caxis(cax);
+
+subplot(<span class="string">'Position'</span>, [0.15,0.4,0.7, 0.08])
+
+colorbar <span class="string">south</span>; caxis(cax);axis <span class="string">tight</span> <span class="string">off</span>;
+
+subplot(<span class="string">'position'</span>, [0.1, 0.1, 0.8, 0.25])
+   plot(-resSol1.wellSol(2).flux .* day(), <span class="string">'b-*'</span>); hold <span class="string">on</span>
+   plot(-resSol2.wellSol(2).flux .* day(), <span class="string">'r--'</span>);
+   legend(<span class="string">'Direct'</span>,<span class="string">'Mimetic'</span>)
+   title(<span class="string">'Producer inflow profile [m^3/d]'</span>);
+</pre><img vspace="5" hspace="5" src="secondTPFA_01.png" alt=""> <h2>Rate controlled wells<a name="10"></a></h2><pre class="codeinput">W = addWell([], G, rock, cellsWell1,          <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'rate'</span>, <span class="string">'Val'</span>, 5.0/day(), <span class="keyword">...</span>
+            <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="string">'Comp_i'</span>, [1, 0]);
+W = addWell(W, G, rock, cellsWell2,      <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'rate'</span> , <span class="string">'Val'</span>, -5.0/day(), <span class="keyword">...</span>
+            <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="string">'Comp_i'</span>, [0, 1]);
+</pre><h2>APPROACH 1: Direct/Classic TPFA<a name="11"></a></h2><pre class="codeinput">resSol1 = initState(G, W, 0, [1, 0]);
+resSol1 = incompTPFA(resSol1, G, T, fluid, <span class="string">'wells'</span>, W, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Setting up linear system...			Elapsed time is 0.014140 seconds.
+Solving linear system...			Elapsed time is 0.032699 seconds.
+Computing fluxes, face pressures etc...		Elapsed time is 0.003176 seconds.
+</pre><h2>APPROACH 2: Mimetic with TPFA-inner product<a name="12"></a></h2><pre class="codeinput">resSol2 = initState(G, W, 0, [1, 0]);
+resSol2 = solveIncompFlow(resSol2, G, IP, fluid, <span class="string">'wells'</span>, W);
+</pre><h2>Report results<a name="13"></a></h2><p>Report pressure drop computed by the two solvers.</p><pre class="codeinput">disp([<span class="string">'DeltaP,  direct TPFA: '</span>, num2str(dp(resSol1))])
+disp([<span class="string">'DeltaP, mimetic TPFA: '</span>, num2str(dp(resSol1))])
+</pre><pre class="codeoutput">DeltaP,  direct TPFA: 0.60245
+DeltaP, mimetic TPFA: 0.60245
+</pre><p>Plot the pressure and producer inflow profile</p><pre class="codeinput">clf
+subplot(<span class="string">'Position'</span>, [0.05,0.55,0.4, 0.35])
+   plotCellData(G, convertTo(resSol1.pressure(1:G.cells.num), barsa()));
+   title(<span class="string">'Pressure: direct TPFA with rate control'</span>)
+   view(45, 25), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+   cax = caxis;
+
+subplot(<span class="string">'Position'</span>, [0.55,0.55,0.4, 0.35])
+
+   plotCellData(G, convertTo(resSol2.pressure(1:G.cells.num), barsa()));
+   title(<span class="string">'Pressure: mimetic TPFA with rate control'</span>)
+   view(45, 25), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+   caxis(cax);
+
+subplot(<span class="string">'Position'</span>, [0.15,0.4,0.7, 0.08])
+
+colorbar <span class="string">south</span>; caxis(cax);axis <span class="string">tight</span> <span class="string">off</span>;
+
+subplot(<span class="string">'position'</span>, [0.1, 0.1, 0.8, 0.25])
+   plot(-resSol1.wellSol(2).flux .* day(), <span class="string">'b-*'</span>); hold <span class="string">on</span>
+   plot(-resSol2.wellSol(2).flux .* day(), <span class="string">'r--'</span>);
+   legend(<span class="string">'Direct'</span>,<span class="string">'Mimetic'</span>)
+   title(<span class="string">'Producer inflow profile [m^3/d]'</span>);
+</pre><img vspace="5" hspace="5" src="secondTPFA_02.png" alt=""> <p><a href="html">html</a> <a href="font">size="-1"</a>   Last time modified:</p><p><a href="/font">/font</a> <a href="/html">/html</a></p><p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Two-Point Flux Approximation Solvers with gravity
+gravity reset on
+
+
+%% Define and process geometry
+% Construct a Cartesian grid of size 10-by-10-by-4 cells, where each cell
+% has dimension 1-by-1-by-1. Because our flow solvers are applicable for
+% general unstructured grids, the Cartesian grid is here represented using
+% an unstructured format in which cells, faces, nodes, etc. are given
+% explicitly.
+nx = 20; ny = 20; nz = 20;
+G = cartGrid([nx, ny, nz]);
+G = computeGeometry(G, 'Verbose', true);
+
+%% Set rock and fluid data
+% The only parameters in the single-phase pressure equation are the
+% permeability $K$, which here is homogeneous, isotropic and equal 100 mD.
+% The fluid has density 1000 kg/m^3 and viscosity 1 cP.
+rock.perm = repmat(100 * milli*darcy, [G.cells.num, 1]);
+fluid     = initSingleFluid('mu' ,    1*centi*poise, ...
+                            'rho', 1014*kilogram/meter^3);
+
+%% Introduce wells
+% We will include two vertical pressure-controlled wells. The wells are described
+% using a Peacemann model, giving an extra set of (trivial) equations that need to be
+% assembled. We need to specify ('InnerProduct', 'ip_tpf') to get the
+% correct well model for TPFA.
+%
+cellsWell1 =  1 : nx*ny : nx*ny*nz;
+W = addWell([], G, rock, cellsWell1,          ...
+            'Type', 'bhp', 'Val', 2.2049*barsa(), ...
+            'InnerProduct', 'ip_tpf', 'Comp_i', [1, 0]);
+
+cellsWell2 = nx*ny: nx*ny : nx*ny*nz;
+W = addWell(W, G, rock, cellsWell2,      ...
+            'Type', 'bhp' , 'Val', 1.0*barsa(), ...
+            'InnerProduct', 'ip_tpf', 'Comp_i', [0, 1]);
+
+
+%% APPROACH 1: Direct/Classic TPFA
+% Initialize solution structures for reservoir and wells.
+resSol1 = initState(G, W, 1.0*barsa, [1, 0]);
+
+% Compute one-sided transmissibilities.
+T = computeTrans(G, rock, 'Verbose', true);
+
+% Solve linear system construced from T and W to obtain solution for flow
+% and pressure in the reservoir and the wells. Notice that the TPFA solver
+% is different from the one used for mimetic systems.
+resSol1 = incompTPFA(resSol1, G, T, fluid, 'wells', W, 'Verbose', true);
+
+
+%% APPROACH 2: Mimetic with TPFA-inner product
+% Initialize solution structures for reservoir and wells.
+resSol2 = initState(G, W, 0, [1,0]);
+
+% Compute mimetic innerproduct equivalent to two-point flux for Cartesian
+% grids.
+IP = computeMimeticIP(G, rock, 'Verbose', true, ...
+                      'InnerProduct', 'ip_tpf');
+
+%%
+% Solve mimetic linear hybrid system
+resSol2 = solveIncompFlow(resSol2, G, IP, fluid, 'wells', W);
+
+%% Report results
+% Report pressure drop computed by the two solvers.
+dp = @(x) convertTo(x.wellSol(1).pressure - ...
+                    x.wellSol(2).pressure, barsa);
+
+disp(['DeltaP,  direct TPFA: ', num2str(dp(resSol1))])
+disp(['DeltaP, mimetic TPFA: ', num2str(dp(resSol2))])
+
+%%
+% Plot the pressure and producer inflow profile
+clf
+subplot('Position', [0.05,0.55,0.4, 0.35])
+   plotCellData(G, convertTo(resSol1.pressure(1:G.cells.num), barsa()));
+   title('Pressure: direct TPFA with pressure control')
+   view(45, 25), camproj perspective, axis tight off, camlight headlight
+   cax = caxis;
+
+subplot('Position', [0.55,0.55,0.4, 0.35])
+   plotCellData(G, convertTo(resSol2.pressure(1:G.cells.num), barsa()));
+   title('Pressure: mimetic TPFA with pressure control')
+   view(45, 25), camproj perspective, axis tight off, camlight headlight
+   caxis(cax);
+   
+subplot('Position', [0.15,0.4,0.7, 0.08])
+
+colorbar south; caxis(cax);axis tight off;
+   
+subplot('position', [0.1, 0.1, 0.8, 0.25])
+   plot(-resSol1.wellSol(2).flux .* day(), 'b-*'); hold on
+   plot(-resSol2.wellSol(2).flux .* day(), 'rREPLACE_WITH_DASH_DASH');
+   legend('Direct','Mimetic')
+   title('Producer inflow profile [m^3/d]');
+
+
+%% Rate controlled wells
+W = addWell([], G, rock, cellsWell1,          ...
+            'Type', 'rate', 'Val', 5.0/day(), ...
+            'InnerProduct', 'ip_tpf', 'Comp_i', [1, 0]);
+W = addWell(W, G, rock, cellsWell2,      ...
+            'Type', 'rate' , 'Val', -5.0/day(), ...
+            'InnerProduct', 'ip_tpf', 'Comp_i', [0, 1]);
+
+
+%% APPROACH 1: Direct/Classic TPFA
+resSol1 = initState(G, W, 0, [1, 0]);
+resSol1 = incompTPFA(resSol1, G, T, fluid, 'wells', W, 'Verbose', true);
+
+
+%% APPROACH 2: Mimetic with TPFA-inner product
+resSol2 = initState(G, W, 0, [1, 0]);
+resSol2 = solveIncompFlow(resSol2, G, IP, fluid, 'wells', W);
+
+%% Report results
+% Report pressure drop computed by the two solvers.
+disp(['DeltaP,  direct TPFA: ', num2str(dp(resSol1))])
+disp(['DeltaP, mimetic TPFA: ', num2str(dp(resSol1))])
+
+%%
+% Plot the pressure and producer inflow profile
+clf
+subplot('Position', [0.05,0.55,0.4, 0.35])
+   plotCellData(G, convertTo(resSol1.pressure(1:G.cells.num), barsa()));
+   title('Pressure: direct TPFA with rate control')
+   view(45, 25), camproj perspective, axis tight off, camlight headlight
+   cax = caxis;
+
+subplot('Position', [0.55,0.55,0.4, 0.35])
+
+   plotCellData(G, convertTo(resSol2.pressure(1:G.cells.num), barsa()));
+   title('Pressure: mimetic TPFA with rate control')
+   view(45, 25), camproj perspective, axis tight off, camlight headlight
+   caxis(cax);
+   
+subplot('Position', [0.15,0.4,0.7, 0.08])
+
+colorbar south; caxis(cax);axis tight off;
+   
+subplot('position', [0.1, 0.1, 0.8, 0.25])
+   plot(-resSol1.wellSol(2).flux .* day(), 'b-*'); hold on
+   plot(-resSol2.wellSol(2).flux .* day(), 'rREPLACE_WITH_DASH_DASH');
+   legend('Direct','Mimetic')
+   title('Producer inflow profile [m^3/d]');
+
+%%
+% <html>
+% <font size="-1">
+%   Last time modified:
+%   $Date: 2012-09-11 14:05:10 +0200 (Tue, 11 Sep 2012) $
+%   $Revision: 9656 $
+% </font>
+% </html>
+displayEndOfDemoMessage(mfilename)
+
+
+##### SOURCE END #####
+--></body></html>

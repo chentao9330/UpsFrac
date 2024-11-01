@@ -1,0 +1,385 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Multiscale Finite Volume Pressure solver: Iterative improvements</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleIterativeMSFVMExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Multiscale Finite Volume Pressure solver: Iterative improvements</h1><!--introduction--><p>The Multiscale Finite Volume Method can be used in smoother-multiscale cycles or as a preconditioner for iterative algorithms. This example demonstrates this usage in preconditioned GMRES and Dirichlet Multiplicative / Additive Schwarz smoothing cycles.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Iteration parameters</a></li><li><a href="#2">Load required modules</a></li><li><a href="#3">Define a simple 2D Cartesian grid</a></li><li><a href="#4">Dual grid</a></li><li><a href="#5">Permeability and fluid</a></li><li><a href="#6">Add a simple Dirichlet boundary</a></li><li><a href="#7">Add some wells near the corners</a></li><li><a href="#8">State and tramsmissibility</a></li><li><a href="#9">Solve the systems</a></li><li><a href="#10">Plot error for the different configurations</a></li><li><a href="#11">Plot smoother cycles</a></li><li><a href="#12">Plot residuals for GMRES</a></li><li><a href="#13">Check error</a></li></ul></div><h2>Iteration parameters<a name="1"></a></h2><p>We will be doing 100 iterations in total, corresponding to 100 GMRES iterations and 10 cycles of 10 smoothings for the MsFV iterations. Omega is initially set to 1.</p><pre class="codeinput">omega = 1;
+subiter = 10;
+iterations = 100;
+cycles = round(iterations/subiter);
+</pre><h2>Load required modules<a name="2"></a></h2><pre class="codeinput">mrstModule <span class="string">add</span> <span class="string">coarsegrid</span> <span class="string">msfvm</span>
+</pre><h2>Define a simple 2D Cartesian grid<a name="3"></a></h2><p>We create a <img src="simpleIterativeMSFVMExample_eq12493.png" alt="$50 \times 50$"> fine grid, and a coarse grid of&nbsp;$5 \times 5$ giving each coarse block <img src="simpleIterativeMSFVMExample_eq27787.png" alt="$10\times10$"> fine cells. We also add geometry data to the grids.</p><pre class="codeinput">nx = 50; ny = 50;
+Nx = 5; Ny = 5;
+<span class="comment">% Instansiate the actual grid</span>
+G = cartGrid([nx, ny]);
+G = computeGeometry(G);
+<span class="comment">% Generate coarse grid</span>
+p = partitionUI(G, [Nx, Ny]);
+CG = generateCoarseGrid(G, p);
+CG = coarsenGeometry(CG);
+</pre><h2>Dual grid<a name="4"></a></h2><p>Generate the dual grid logically and plot it.</p><pre class="codeinput">DG = partitionUIdual(CG, [Nx, Ny]);
+<span class="comment">% Plot the dual grid</span>
+clf;
+plotDual(G, DG)
+view(0,90), axis <span class="string">tight</span>
+</pre><img vspace="5" hspace="5" src="simpleIterativeMSFVMExample_01.png" alt=""> <h2>Permeability and fluid<a name="5"></a></h2><p>We define a single phase fluid.</p><pre class="codeinput">fluid        = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                                <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+<span class="comment">% Generate a lognormal field via porosity</span>
+poro = gaussianField(G.cartDims, [.2 .4], [11 3 3], 2.5);
+K = poro.^3.*(1e-5)^2./(0.81*72*(1-poro).^2);
+rock.perm    = K(:);
+clf;
+plotCellData(G, log10(rock.perm));
+axis <span class="string">tight</span> <span class="string">off</span>;
+</pre><img vspace="5" hspace="5" src="simpleIterativeMSFVMExample_02.png" alt=""> <h2>Add a simple Dirichlet boundary<a name="6"></a></h2><pre class="codeinput">bc = [];
+bc = pside   (bc, G, <span class="string">'LEFT'</span>, .5*barsa());
+bc = pside   (bc, G, <span class="string">'RIGHT'</span>, .25*barsa());
+</pre><h2>Add some wells near the corners<a name="7"></a></h2><pre class="codeinput">W = [];
+cell1 = round(nx*1/8) + nx*round(ny*1/8);
+cell2 = round(nx*7/8) + nx*round(ny*7/8);
+
+W = addWell(W, G, rock, cell1,      <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>, 1*barsa(), <span class="keyword">...</span>
+            <span class="string">'Radius'</span>, 0.1, <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="keyword">...</span>
+            <span class="string">'Comp_i'</span>, [0, 1]);
+
+W = addWell(W, G, rock, cell2,      <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>, 0*barsa(), <span class="keyword">...</span>
+            <span class="string">'Radius'</span>, 0.1, <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="keyword">...</span>
+            <span class="string">'Comp_i'</span>, [0, 1]);
+</pre><h2>State and tramsmissibility<a name="8"></a></h2><p>Instansiate empty well and calculate transmissibility.</p><pre class="codeinput">sol = initState(G, [], 0, [1, 0]);
+T = computeTrans(G, rock);
+</pre><h2>Solve the systems<a name="9"></a></h2><p>We define an anonymous function because many parameters are common to each call tol solveMSFVM_TPFA_Incomp. This makes it easy to compare different parameters without duplicating code.</p><pre class="codeinput">solvems = @(iterations, subiterations, iterator, smoother, omega) <span class="keyword">...</span>
+        solveMSFV_TPFA_Incomp(sol, G, CG, T, fluid, <span class="string">'Wells'</span>, W, <span class="keyword">...</span>
+        <span class="string">'Dual'</span>, DG, <span class="string">'bc'</span>, bc,<span class="keyword">...</span>
+        <span class="string">'Iterations'</span>,       iterations,<span class="keyword">...</span>
+        <span class="string">'Subiterations'</span>,    subiterations,<span class="keyword">...</span>
+        <span class="string">'Iterator'</span>,         iterator,<span class="keyword">...</span>
+        <span class="string">'Smoother'</span>,         smoother,<span class="keyword">...</span>
+        <span class="string">'Omega'</span>,            omega, <span class="keyword">...</span>
+        <span class="string">'Verbose'</span>,          false);
+
+disp <span class="string">'Solving reference solution'</span>;
+tic; solRef = incompTPFA(sol, G, T, fluid, <span class="string">'bc'</span>, bc, <span class="string">'wells'</span>, W); toc;
+disp <span class="string">'Solving without iterations'</span>;
+tic; solFV_noiter = solvems(0, 0, <span class="string">''</span>, <span class="string">''</span>, 0); toc;
+disp <span class="string">'Solving with GMRES using MsFV preconditioner'</span>;
+tic; solFV_gmres = solvems(iterations, 0, <span class="string">'gmres'</span>, <span class="string">''</span>, 0) ;toc;
+disp <span class="string">'Solving with GMRES without preconditioner'</span>;
+tic; solFV_direct =solvems(iterations, 0, <span class="string">'gmres-direct'</span>, <span class="string">''</span>, 0) ;toc;
+disp <span class="string">'Solving with Dirichlet Multiplicative Schwarz (DMS) smoother cycles'</span>;
+tic; solFV_dms = solvems(cycles, subiter, <span class="string">'msfvm'</span>, <span class="string">'DMS'</span>, omega);toc;
+disp <span class="string">'Solving with Dirichlet Additive Schwarz (DAS) smoother cycles'</span>;
+tic; solFV_das = solvems(cycles, subiter, <span class="string">'msfvm'</span>, <span class="string">'DAS'</span>, omega);toc;
+</pre><pre class="codeoutput">Solving reference solution
+Elapsed time is 0.009063 seconds.
+Solving without iterations
+Elapsed time is 0.016270 seconds.
+Solving with GMRES using MsFV preconditioner
+Elapsed time is 0.132140 seconds.
+Solving with GMRES without preconditioner
+Elapsed time is 0.162605 seconds.
+Solving with Dirichlet Multiplicative Schwarz (DMS) smoother cycles
+Elapsed time is 1.538826 seconds.
+Solving with Dirichlet Additive Schwarz (DAS) smoother cycles
+Elapsed time is 0.931277 seconds.
+</pre><h2>Plot error for the different configurations<a name="10"></a></h2><pre class="codeinput">clf;
+subplot(2,2,1)
+<span class="comment">% We plot the error scaled with total variation in the reference solution.</span>
+variation = abs(max(solRef.pressure - min(solRef.pressure)));
+
+plotCellData(G, abs(solRef.pressure - solFV_noiter.pressure) ./ variation);
+view(0,90); axis <span class="string">tight</span> <span class="string">off</span>; colorbar;
+title(<span class="string">'MsFV error (No iterations)'</span>)
+subplot(2,2,2)
+
+
+plotCellData(G, abs(solRef.pressure - solFV_gmres.pressure) ./ variation);
+view(0,90); axis <span class="string">tight</span> <span class="string">off</span>; colorbar;
+title(<span class="string">'MsFV-GMRES error'</span>)
+
+subplot(2,2,3)
+<span class="comment">% Plot error scaled with local variation</span>
+plotCellData(G, abs(solRef.pressure - solFV_dms.pressure) ./ variation);
+view(0,90); axis <span class="string">tight</span> <span class="string">off</span>; colorbar;
+title(<span class="string">'MsFV-DMS error'</span>)
+
+subplot(2,2,4)
+<span class="comment">% Plot error scaled with local variation</span>
+plotCellData(G, abs(solRef.pressure - solFV_das.pressure) ./ variation);
+view(0,90); axis <span class="string">tight</span> <span class="string">off</span>; colorbar;
+title(<span class="string">'MsFV-DAS error'</span>)
+</pre><img vspace="5" hspace="5" src="simpleIterativeMSFVMExample_03.png" alt=""> <h2>Plot smoother cycles<a name="11"></a></h2><p>We plot the preconditioned residuals for the smoother cycles. Note that the residual decreases monotonically within a smoother cycle, but jumps back up when a MsFV solution is comptuted. This is because the new multiscale solution is recomptued with source terms to get a better approximation than the last smoother cycle. The end of a cycle is marked in red.</p><pre class="codeinput">clf;
+
+semilogy([solFV_dms.residuals; solFV_das.residuals]');
+hold <span class="string">on</span>
+title(<span class="string">'Smoother convergence rates'</span>);
+
+xlabel(sprintf(<span class="string">'Iterations (Every %dth tick is the end of a cycle)'</span>, subiter));
+ylabel(<span class="string">'Preconditioned residual($\|M^{-1}Q(\tilde{r} - \tilde{A}\tilde{u}) \|_2$)'</span>,<span class="string">'interpreter'</span>,<span class="string">'latex'</span>)
+t_ms = 1:subiter:iterations;
+
+semilogy(t_ms, solFV_dms.residuals(t_ms), <span class="string">'rx'</span>)
+semilogy(t_ms, solFV_das.residuals(t_ms), <span class="string">'ro'</span>)
+legend({<span class="string">'DMS'</span>,<span class="string">'DAS'</span>, <span class="string">'MS (DMS)'</span>, <span class="string">'MS (DAS)'</span>});
+</pre><img vspace="5" hspace="5" src="simpleIterativeMSFVMExample_04.png" alt=""> <h2>Plot residuals for GMRES<a name="12"></a></h2><p>The residuals of the preconditioned GMRES are not directly comparable to GMRES without preconditioner, but we can compare the number of iterations.</p><pre class="codeinput">clf;subplot(2,1,1)
+semilogy([solFV_gmres.residuals]');
+title(<span class="string">'GMRES convergence rate'</span>); legend({<span class="string">'GMRES'</span>});
+xlabel(<span class="string">'Iterations'</span>);
+ylabel(<span class="string">'Preconditioned residual'</span>)
+
+subplot(2,1,2);
+semilogy([solFV_direct.residuals]');
+title(<span class="string">'GMRES convergence rate'</span>); legend({<span class="string">'GMRES-direct'</span>});
+xlabel(<span class="string">'Iterations'</span>);
+</pre><img vspace="5" hspace="5" src="simpleIterativeMSFVMExample_05.png" alt=""> <h2>Check error<a name="13"></a></h2><p>Note that while the norms are different, the preconditioned GMRES converges while the direct GMRES does not. They both start with the same initial pressure solution. To see that the preconditioner ends up with a better result, we can compare the final pressure solutions:</p><pre class="codeinput">disp <span class="string">'With preconditioner:'</span>
+reportError(solRef.pressure, solFV_gmres.pressure);
+disp <span class="string">'Without preconditioner:'</span>
+reportError(solRef.pressure, solFV_direct.pressure);
+</pre><pre class="codeoutput">With preconditioner:
+ERROR:
+	2: 0.00000000
+	Sup: 0.00000000
+	Minimum 0.00000000
+Without preconditioner:
+ERROR:
+	2: 0.00088122
+	Sup: 0.00069480
+	Minimum 0.00009498
+</pre><p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Multiscale Finite Volume Pressure solver: Iterative improvements
+% The Multiscale Finite Volume Method can be used in smoother-multiscale
+% cycles or as a preconditioner for iterative algorithms. This example
+% demonstrates this usage in preconditioned GMRES and Dirichlet
+% Multiplicative / Additive Schwarz smoothing cycles.
+
+%% Iteration parameters
+% We will be doing 100 iterations in total, corresponding to 100 GMRES
+% iterations and 10 cycles of 10 smoothings for the MsFV iterations. Omega
+% is initially set to 1.
+omega = 1;
+subiter = 10;
+iterations = 100;
+cycles = round(iterations/subiter);
+
+%% Load required modules
+mrstModule add coarsegrid msfvm
+%% Define a simple 2D Cartesian grid
+% We create a $50 \times 50$ fine grid, and a coarse grid of $5 \times 5$
+% giving each coarse block $10\times10$ fine cells. We also add geometry
+% data to the grids.
+nx = 50; ny = 50;
+Nx = 5; Ny = 5;
+% Instansiate the actual grid
+G = cartGrid([nx, ny]);
+G = computeGeometry(G);
+% Generate coarse grid
+p = partitionUI(G, [Nx, Ny]);
+CG = generateCoarseGrid(G, p);
+CG = coarsenGeometry(CG);
+
+
+%% Dual grid
+% Generate the dual grid logically and plot it.
+DG = partitionUIdual(CG, [Nx, Ny]);
+% Plot the dual grid
+clf;
+plotDual(G, DG)
+view(0,90), axis tight
+
+%% Permeability and fluid
+% We define a single phase fluid.
+fluid        = initSingleFluid('mu' ,    1*centi*poise     , ...
+                                'rho', 1014*kilogram/meter^3);
+% Generate a lognormal field via porosity
+poro = gaussianField(G.cartDims, [.2 .4], [11 3 3], 2.5);
+K = poro.^3.*(1e-5)^2./(0.81*72*(1-poro).^2);
+rock.perm    = K(:);
+clf;
+plotCellData(G, log10(rock.perm));
+axis tight off;
+%% Add a simple Dirichlet boundary
+bc = [];
+bc = pside   (bc, G, 'LEFT', .5*barsa());
+bc = pside   (bc, G, 'RIGHT', .25*barsa());
+%% Add some wells near the corners
+W = [];
+cell1 = round(nx*1/8) + nx*round(ny*1/8);
+cell2 = round(nx*7/8) + nx*round(ny*7/8);
+
+W = addWell(W, G, rock, cell1,      ...
+            'Type', 'bhp' , 'Val', 1*barsa(), ...
+            'Radius', 0.1, 'InnerProduct', 'ip_tpf', ...
+            'Comp_i', [0, 1]);
+
+W = addWell(W, G, rock, cell2,      ...
+            'Type', 'bhp' , 'Val', 0*barsa(), ...
+            'Radius', 0.1, 'InnerProduct', 'ip_tpf', ...
+            'Comp_i', [0, 1]);
+%% State and tramsmissibility
+% Instansiate empty well and calculate transmissibility.
+sol = initState(G, [], 0, [1, 0]);
+T = computeTrans(G, rock);
+%% Solve the systems
+% We define an anonymous function because many parameters are common to
+% each call tol solveMSFVM_TPFA_Incomp. This makes it easy to compare
+% different parameters without duplicating code.
+
+solvems = @(iterations, subiterations, iterator, smoother, omega) ...
+        solveMSFV_TPFA_Incomp(sol, G, CG, T, fluid, 'Wells', W, ...
+        'Dual', DG, 'bc', bc,...
+        'Iterations',       iterations,...
+        'Subiterations',    subiterations,...
+        'Iterator',         iterator,...
+        'Smoother',         smoother,...
+        'Omega',            omega, ...
+        'Verbose',          false);
+    
+disp 'Solving reference solution';
+tic; solRef = incompTPFA(sol, G, T, fluid, 'bc', bc, 'wells', W); toc;
+disp 'Solving without iterations';
+tic; solFV_noiter = solvems(0, 0, '', '', 0); toc;
+disp 'Solving with GMRES using MsFV preconditioner';
+tic; solFV_gmres = solvems(iterations, 0, 'gmres', '', 0) ;toc;
+disp 'Solving with GMRES without preconditioner';
+tic; solFV_direct =solvems(iterations, 0, 'gmres-direct', '', 0) ;toc;
+disp 'Solving with Dirichlet Multiplicative Schwarz (DMS) smoother cycles';
+tic; solFV_dms = solvems(cycles, subiter, 'msfvm', 'DMS', omega);toc;
+disp 'Solving with Dirichlet Additive Schwarz (DAS) smoother cycles';
+tic; solFV_das = solvems(cycles, subiter, 'msfvm', 'DAS', omega);toc;
+
+%% Plot error for the different configurations
+clf;
+subplot(2,2,1)
+% We plot the error scaled with total variation in the reference solution.
+variation = abs(max(solRef.pressure - min(solRef.pressure)));
+
+plotCellData(G, abs(solRef.pressure - solFV_noiter.pressure) ./ variation);
+view(0,90); axis tight off; colorbar;
+title('MsFV error (No iterations)')
+subplot(2,2,2)
+
+
+plotCellData(G, abs(solRef.pressure - solFV_gmres.pressure) ./ variation);
+view(0,90); axis tight off; colorbar;
+title('MsFV-GMRES error')
+
+subplot(2,2,3)
+% Plot error scaled with local variation
+plotCellData(G, abs(solRef.pressure - solFV_dms.pressure) ./ variation);
+view(0,90); axis tight off; colorbar;
+title('MsFV-DMS error')
+
+subplot(2,2,4)
+% Plot error scaled with local variation
+plotCellData(G, abs(solRef.pressure - solFV_das.pressure) ./ variation);
+view(0,90); axis tight off; colorbar;
+title('MsFV-DAS error')
+
+%% Plot smoother cycles
+% We plot the preconditioned residuals for the smoother cycles. Note that
+% the residual decreases monotonically within a smoother cycle, but jumps
+% back up when a MsFV solution is comptuted. This is because the new
+% multiscale solution is recomptued with source terms to get a better
+% approximation than the last smoother cycle. The end of a cycle is marked 
+% in red.
+clf;
+
+semilogy([solFV_dms.residuals; solFV_das.residuals]');
+hold on
+title('Smoother convergence rates'); 
+
+xlabel(sprintf('Iterations (Every %dth tick is the end of a cycle)', subiter));
+ylabel('Preconditioned residual($\|M^{-1}Q(\tilde{r} - \tilde{A}\tilde{u}) \|_2$)','interpreter','latex')
+t_ms = 1:subiter:iterations;
+
+semilogy(t_ms, solFV_dms.residuals(t_ms), 'rx')
+semilogy(t_ms, solFV_das.residuals(t_ms), 'ro')
+legend({'DMS','DAS', 'MS (DMS)', 'MS (DAS)'});
+%% Plot residuals for GMRES
+% The residuals of the preconditioned GMRES are not directly comparable to
+% GMRES without preconditioner, but we can compare the number of
+% iterations.
+clf;subplot(2,1,1)
+semilogy([solFV_gmres.residuals]');
+title('GMRES convergence rate'); legend({'GMRES'});
+xlabel('Iterations');
+ylabel('Preconditioned residual')
+
+subplot(2,1,2);
+semilogy([solFV_direct.residuals]');
+title('GMRES convergence rate'); legend({'GMRES-direct'});
+xlabel('Iterations');
+%% Check error
+% Note that while the norms are different, the preconditioned GMRES
+% converges while the direct GMRES does not. They both start with the same
+% initial pressure solution. To see that the preconditioner ends up with a
+% better result, we can compare the final pressure solutions:
+disp 'With preconditioner:'
+reportError(solRef.pressure, solFV_gmres.pressure);
+disp 'Without preconditioner:'
+reportError(solRef.pressure, solFV_direct.pressure);
+
+##### SOURCE END #####
+--></body></html>

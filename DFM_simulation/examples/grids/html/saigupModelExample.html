@@ -1,0 +1,477 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>saigupModelExample</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="saigupModelExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Corner-Point Grids: Example of a realistic Field Model</a></li><li><a href="#2">Check for existence of input model data</a></li><li><a href="#3">Read and process the model</a></li><li><a href="#6">Inspect the whole model</a></li><li><a href="#8">Inspect the active model</a></li><li><a href="#9">Partition the grid in logical space</a></li><li><a href="#12">Build the coarse-grid</a></li></ul></div><h2>Corner-Point Grids: Example of a realistic Field Model<a name="1"></a></h2><p>
+In this example, we will examine a model from the project
+Sensitivity Analysis of the Impact of Geological Uncertainties on
+Production forecasting in clastic hydrocarbon reservoirs
+ <a href="http://www.nr.no/pages/sand/area_res_char_saigup"> (SAIGUP).</a>
+The model has faults, inactive cells, and disconnected components,
+but no pinch-out. For a tutorial including pinched cells see the
+<a href=http://www.sintef.no/Projectweb/MRST/Tutorials/Real-Field-Model-I/>
+MRST webpages</a>.
+We will show how to read, process, and visualize the
+model. Then we demonstrate how one can form an overlying coarse grid by
+partitioning the fine-grid uniformly in logical Cartesian space. We end
+by visualizing some of the coarse blocks and how they are connected with
+their neighbors.
+</p><pre class="codeinput">require <span class="string">coarsegrid</span>
+</pre><h2>Check for existence of input model data<a name="2"></a></h2><p>The model can be downloaded from the the MRST page</p><p><a href="http://www.sintef.no/Projectweb/MRST/">http://www.sintef.no/Projectweb/MRST/</a></p><pre class="codeinput">grdecl = fullfile(ROOTDIR, <span class="string">'examples'</span>, <span class="string">'data'</span>, <span class="string">'SAIGUP'</span>, <span class="string">'SAIGUP.GRDECL'</span>);
+
+<span class="keyword">if</span> ~exist(grdecl, <span class="string">'file'</span>),
+   error(<span class="string">'SAIGUP model data is not available.'</span>)
+<span class="keyword">end</span>
+</pre><h2>Read and process the model<a name="3"></a></h2><p>We start by reading the model from a file in the Eclipse format (GRDECL)</p><pre class="codeinput">grdecl = readGRDECL(grdecl)    <span class="comment">%#ok  (intentional display)</span>
+</pre><pre class="codeoutput">
+grdecl = 
+
+    cartDims: [40 120 20]
+       COORD: [29766x1 double]
+       ZCORN: [768000x1 double]
+      ACTNUM: [96000x1 int32]
+       PERMX: [96000x1 double]
+       PERMY: [96000x1 double]
+       PERMZ: [96000x1 double]
+       MULTX: [96000x1 double]
+       MULTY: [96000x1 double]
+       MULTZ: [96000x1 double]
+        PORO: [96000x1 double]
+         NTG: [96000x1 double]
+      SATNUM: [96000x1 double]
+
+</pre><p>From the output of readGRDECL, we see that the file contains four fields:</p><div><ul><li>The dimension of the underlying logical Cartesian grid (keyword SPECGRID, equal 40x120x20)</li><li>The coordinates of the pillars (keyword COORD, 6x41x121 values)</li><li>The coordinates along the pillars (keyword ZCORN, 8x40x120x20 values)</li><li>The flag for active/inactive cells (keyword ACTNUM, 40x120x20 values)</li></ul></div><p>Since the keyword ACTNUM is present, the model is likely to contain both active and inactive cells. To be able to plot both the active and the inactive cells, we need to override the ACTNUM field when processing the input, because if not, the inactive cells will be ignored when the unstructured grid is built.</p><p>WARNING: inactive cells often contain garbage data and should generally not be inspected in this manner. Here, most inactive cells are defined in a reasonable way. By not performing basic sanity checks on the resulting grid (option <tt>'checkgrid'=false</tt>), we manage to process the grid and produce reasonable graphical output. In general, however, we strongly advice that <tt>'checkgrid'</tt> remain set in its default state of <tt>true</tt>.</p><p>To simplify the processing, a single layer of artificial cells is added above the top and below the bottom of the model, but not touching the model.  (See the tutorial <a href="cornerPointModelExample.html#1">"Read, Display, and Manipulate"</a> for more details). In the following, we therefore work with a 40x120x22 model.</p><pre class="codeinput">actnum        = grdecl.ACTNUM;
+grdecl.ACTNUM = ones(prod(grdecl.cartDims),1);
+G             = processGRDECL(grdecl, <span class="string">'Verbose'</span>, true, <span class="string">'checkgrid'</span>, false);
+</pre><pre class="codeoutput">Adding 9600 artifical cells at top/bottom
+
+Processing regular i-faces
+ Found 96778 new regular faces
+Elapsed time is 0.037365 seconds.
+
+Processing i-faces on faults
+ Found 521 faulted stacks
+ Found 27752 new faces
+Elapsed time is 1.318806 seconds.
+
+Processing regular j-faces
+ Found 101508 new regular faces
+Elapsed time is 0.040340 seconds.
+
+Processing j-faces on faults
+ Found 226 faulted stacks
+ Found 12711 new faces
+Elapsed time is 0.473271 seconds.
+
+Processing regular k-faces
+ Found 120000 new regular faces
+Elapsed time is 0.043839 seconds.
+
+Building grid structure
+removing 9600 artifical cells at top/bottom
+removing 0 inactive and pinched cells
+
+Grid has 2 disconnected components
+</pre><p>In the first phase, we process all faces with normals in the logical i-direction. There should be 40x120x22=105600, out of which 96778 are not degenerate or at a fault. In the next phase, we process the faults and split faces to obtain a matching grid. Here there are faults at 521 pairs of pillars and the splitting of these results in 27752 new faces. If each face were split in two, we would have obtained 521x(20x2+2)=21882, which means that some of the faces have been split into at least three subfaces. The process is then repeated in the logical j-direction.</p><p>The processing assumes that there are no faults in the logical k-direction and therefore processes only regular connections. In absence of inactive or pinched cells, there should be (20+1+4)x120x40=120000 faces (where +4 is due to the artificial cells) in the k-direction. The result of the grid processing is a new structure G, outlined below</p><pre class="codeinput">G   <span class="comment">%#ok  (intentional display)</span>
+</pre><pre class="codeoutput">
+G = 
+
+1x2 struct array with fields:
+    nodes
+    faces
+    cells
+    cartDims
+    type
+    griddim
+
+</pre><h2>Inspect the whole model<a name="6"></a></h2><p>Having obtained the grid in the correct unstructured format, we first plot the outline of the whole model and highlight all faults. This model consist of two separated grids so that numel(G)=2</p><pre class="codeinput">newplot; subplot(<span class="string">'position'</span>,[0.025 0.025 0.95 0.95]);
+<span class="keyword">for</span> i=1:numel(G)
+   plotGrid(G(i),<span class="string">'FaceColor'</span>,<span class="string">'none'</span>,<span class="string">'EdgeColor'</span>,[0.65 0.65 0.65], <span class="keyword">...</span>
+           <span class="string">'EdgeAlpha'</span>,0.2);
+   plotFaces(G(i),find(G(i).faces.tag&gt;0),<span class="string">'FaceColor'</span>,<span class="string">'red'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+<span class="keyword">end</span>
+axis <span class="string">off</span>;
+axis <span class="string">auto</span>;
+view(-10,40); zoom(1.0);
+</pre><img vspace="5" hspace="5" src="saigupModelExample_01.png" alt=""> <p>Then we distinguish the active and inactive cells using the <tt>'FaceColor'</tt> property set to <tt>'none'</tt> for the inactive cells and to <tt>'y'</tt> for the active cells. We notice that that only <tt>G(1)</tt> has active cells, this is indicated with the warning.</p><pre class="codeinput">cla;
+<span class="keyword">for</span> i=1:numel(G)
+   hi = plotGrid(G(i),find(~actnum(G(i).cells.indexMap)), <span class="keyword">...</span>
+        <span class="string">'FaceColor'</span>,<span class="string">'none'</span>,<span class="string">'EdgeColor'</span>,[0.65 0.65 0.65],<span class="string">'EdgeAlpha'</span>,0.2);
+   ha = plotGrid(G(i),find( actnum(G(i).cells.indexMap)), <span class="keyword">...</span>
+                <span class="string">'FaceColor'</span>,<span class="string">'y'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+   axis <span class="string">auto</span> <span class="string">off</span>; view(-10,40); zoom(1.0);
+<span class="keyword">end</span>
+</pre><pre class="codeoutput">Warning: Empty cell selection in 'plotGrid'.  No graphics for you. 
+Warning: Empty cell selection in 'plotGrid'.  No graphics for you. 
+</pre><img vspace="5" hspace="5" src="saigupModelExample_02.png" alt=""> <h2>Inspect the active model<a name="8"></a></h2><p>To inspect only the active model, we reset the ACTNUM field to its original values and recreate the grid. Now, inactive cells will be ignored and we therefore get a different unstructured grid. If we include the actnum, G from proccessGRDECL has only one component.</p><pre class="codeinput">grdecl.ACTNUM = actnum; clear <span class="string">actnum</span>;
+G = processGRDECL(grdecl);
+</pre><h2>Partition the grid in logical space<a name="9"></a></h2><p>We construct a coarse grid by partitioning the grid uniformly as 6x12x3 coarse blocks in index space. This process partitions all cells in the logical 40x120x20 grid, including cells that are inactive. The number of active cells within each coarse block is shown in the bar plot below.</p><p>As we can see from the bar plot, there are several coarse block that contain no active cells. We therefore postprocess the partitioning to remove blocks that contain no active cells, and then renumber the overall partitioning, giving a new total of 201 blocks. The number of blocks is found by <tt>m=max(blockIx)</tt>.</p><p>Because the partitioning has been performed in logical index space, we have so far disregarded the fact the some of the blocks may contain disconnected cells because of erosion, faults, etc. We therefore postprocess the grid in physical space and split disconnected blocks.</p><pre class="codeinput"><span class="comment">% Partition in index space</span>
+blockIx = partitionUI(G,[6 12 3]); m=max(blockIx);
+newplot, subplot(3,1,1)
+   bar(accumarray(blockIx,1)); set(gca,<span class="string">'XLim'</span>,[0 m]);
+   title(<span class="string">'Unprocessed'</span>);
+
+<span class="comment">% Remove blocks containing no active cells</span>
+blockIx = compressPartition(blockIx);
+subplot(3,1,2)
+   bar(accumarray(blockIx,1)); set(gca,<span class="string">'XLim'</span>,[0 m]);
+   title(<span class="string">'Compressed'</span>);
+
+<span class="comment">% Split disconnected blocks</span>
+blockIx = processPartition(G,blockIx);
+subplot(3,1,3)
+   bar(accumarray(blockIx,1)); set(gca,<span class="string">'XLim'</span>,[0 m]);
+   title(<span class="string">'Processed'</span>);
+
+assert (all(accumarray(blockIx, 1) &gt; 0))
+</pre><img vspace="5" hspace="5" src="saigupModelExample_03.png" alt=""> <p>We have now obtained a partitioning consisting of 243 blocks, in which each coarse block consists of a set of connected cells in the fine grid. To show the partitioning, we plot the coarse blocks using a random and cyclic color scheme for the blocks.</p><pre class="codeinput">newplot
+subplot(<span class="string">'position'</span>,[0.025 0.025 0.95 0.95])
+   blockCol = rand(max(blockIx),1)*33;
+   plotCellData(G,mod(blockCol(blockIx),11),<span class="string">'EdgeAlpha'</span>,0.1);
+   axis <span class="string">tight</span> <span class="string">off</span>; view(-60,40);zoom(1.0); shading <span class="string">faceted</span>
+</pre><img vspace="5" hspace="5" src="saigupModelExample_04.png" alt=""> <p>From the plot above, it is not easy to see the shape of the individual coarse blocks. In the next section, we will therefore show some examples of how individual blocks can be visualized.</p><h2>Build the coarse-grid<a name="12"></a></h2><p>Having obtained a partition we are satisfied with, we build the coarse-grid structure. This structure consists of three parts:</p><div><ul><li>the cell structure giving the number of blocks and the indices of the cells contained in each block</li><li>the face structure giving the number of coarse faces and the indices of the neighbouring blocks</li><li>a cellFaces array as in the fine-grid structure</li></ul></div><pre class="codeinput">CG = generateCoarseGrid(G, blockIx);
+CG             <span class="comment">%#ok  (intentional display)</span>
+CG.cells       <span class="comment">%#ok  (intentional display)</span>
+CG.faces       <span class="comment">%#ok  (intentional display)</span>
+</pre><pre class="codeoutput">
+CG = 
+
+        cells: [1x1 struct]
+        faces: [1x1 struct]
+    partition: [78720x1 double]
+       parent: [1x1 struct]
+      griddim: 3
+
+
+ans = 
+
+        num: 243
+    facePos: [244x1 double]
+      faces: [2184x2 double]
+
+
+ans = 
+
+          num: 1474
+    neighbors: [1474x2 double]
+      connPos: [1475x1 double]
+        fconn: [60970x1 double]
+
+</pre><p>Let us now use <tt>CG</tt> to inspect some of the blocks in the coarse grid. To this end, we arbitrarily pick a few blocks and inspect these block and their neighbours. For the first block, we plot the cells and the faces that have been marked as lying on a fault</p><pre class="codeinput">clf; plotBlockAndNeighbors(G,CG,48); view(-90,70);
+</pre><img vspace="5" hspace="5" src="saigupModelExample_05.png" alt=""> <p>For the second block, we only plot the cells and not the faulted faces</p><pre class="codeinput">clf; plotBlockAndNeighbors(G,CG,15,<span class="string">'PlotFaults'</span>,false); view(90,70);
+</pre><img vspace="5" hspace="5" src="saigupModelExample_06.png" alt=""> <p>The third set of neighboring blocks contains more faults</p><pre class="codeinput">clf; plotBlockAndNeighbors(G,CG,21); view(0,40);
+</pre><img vspace="5" hspace="5" src="saigupModelExample_07.png" alt=""> <p>We end the example by highlighting six representative blocks, including the three blocks we inspected above. Notice that this way of visualization only uses the fine grid and the partition vector, and thus does not require that the coarse-grid structure has been built.</p><pre class="codeinput">clf
+blocks = [4, 16,33, 36, 52];
+col = [<span class="string">'b'</span>,<span class="string">'g'</span>,<span class="string">'r'</span>,<span class="string">'c'</span>,<span class="string">'m'</span>,<span class="string">'y'</span>];
+axes(<span class="string">'position'</span>,[0.01 0.25 0.99 0.75]);
+   plotGrid(G,<span class="string">'EdgeColor'</span>,[0.75 0.75 0.75],<span class="string">'FaceColor'</span>,<span class="string">'w'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+   outlineCoarseGrid(G,blockIx, <span class="string">'FaceColor'</span>, <span class="string">'none'</span>, <span class="keyword">...</span>
+                     <span class="string">'LineWidth'</span>, 2,<span class="string">'EdgeAlpha'</span>,0.1);
+   <span class="keyword">for</span> i=1:numel(blocks),
+      plotGrid(G,find(blockIx==blocks(i)),<span class="string">'FaceColor'</span>,col(i));
+   <span class="keyword">end</span>
+   axis <span class="string">tight</span> <span class="string">off</span>; view(10,90);
+
+<span class="comment">% Plot the chosen 6 coarse blocks</span>
+<span class="keyword">for</span> i=1:numel(blocks);
+   axes(<span class="string">'position'</span>,[(i-1)/5 0.02 1/6 0.25]);
+   plotGrid(G,find(blockIx==blocks(i)),<span class="string">'FaceColor'</span>,col(i),<span class="string">'EdgeAlpha'</span>,0.4);
+   axis <span class="string">tight</span> <span class="string">off</span>, view(0,75), zoom(1.2)
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="saigupModelExample_08.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Corner-Point Grids: Example of a realistic Field Model 
+%
+% <html>
+% In this example, we will examine a model from the project
+% Sensitivity Analysis of the Impact of Geological Uncertainties on 
+% Production forecasting in clastic hydrocarbon reservoirs
+%  <a href="http://www.nr.no/pages/sand/area_res_char_saigup"> (SAIGUP).</a> 
+% The model has faults, inactive cells, and disconnected components, 
+% but no pinch-out. For a tutorial including pinched cells see the
+% <a href=http://www.sintef.no/Projectweb/MRST/Tutorials/Real-Field-Model-I/>
+% MRST webpages</a>.
+% We will show how to read, process, and visualize the 
+% model. Then we demonstrate how one can form an overlying coarse grid by
+% partitioning the fine-grid uniformly in logical Cartesian space. We end
+% by visualizing some of the coarse blocks and how they are connected with
+% their neighbors.
+% </html>
+ 
+require coarsegrid
+%% Check for existence of input model data
+% The model can be downloaded from the the MRST page
+%
+% http://www.sintef.no/Projectweb/MRST/
+
+grdecl = fullfile(ROOTDIR, 'examples', 'data', 'SAIGUP', 'SAIGUP.GRDECL');
+
+if ~exist(grdecl, 'file'),
+   error('SAIGUP model data is not available.')
+end
+
+%% Read and process the model
+% We start by reading the model from a file in the Eclipse format (GRDECL)
+grdecl = readGRDECL(grdecl)    %#ok  (intentional display)
+
+%%
+% From the output of readGRDECL, we see that the file contains four fields:
+%
+% * The dimension of the underlying logical Cartesian grid (keyword
+% SPECGRID, equal 40x120x20)
+% * The coordinates of the pillars (keyword COORD, 6x41x121 values)
+% * The coordinates along the pillars (keyword ZCORN, 8x40x120x20 values)
+% * The flag for active/inactive cells (keyword ACTNUM, 40x120x20 values)
+%
+% Since the keyword ACTNUM is present, the model is likely to contain both
+% active and inactive cells. To be able to plot both the active and the
+% inactive cells, we need to override the ACTNUM field when processing the
+% input, because if not, the inactive cells will be ignored when the
+% unstructured grid is built.
+%
+% WARNING: inactive cells often contain garbage data and should generally
+% not be inspected in this manner. Here, most inactive cells are defined in
+% a reasonable way. By not performing basic sanity checks on the resulting
+% grid (option |'checkgrid'=false|), we manage to process the grid and
+% produce reasonable graphical output. In general, however, we strongly
+% advice that |'checkgrid'| remain set in its default state of |true|.
+%
+% To simplify the processing, a single layer of artificial cells is added
+% above the top and below the bottom of the model, but not touching the
+% model.  (See the tutorial <cornerPointModelExample.html#1 "Read, Display,
+% and Manipulate"> for more details). In the following, we therefore work
+% with a 40x120x22 model.
+%
+actnum        = grdecl.ACTNUM;
+grdecl.ACTNUM = ones(prod(grdecl.cartDims),1);
+G             = processGRDECL(grdecl, 'Verbose', true, 'checkgrid', false);
+
+%%
+% In the first phase, we process all faces with normals in the logical
+% i-direction. There should be 40x120x22=105600, out of which 96778 are
+% not degenerate or at a fault. In the next phase, we process the faults
+% and split faces to obtain a matching grid. Here there are faults at 521
+% pairs of pillars and the splitting of these results in 27752 new faces.
+% If each face were split in two, we would have obtained
+% 521x(20x2+2)=21882, which means that some of the faces have been split
+% into at least three subfaces. The process is then repeated in the logical
+% j-direction.
+%
+% The processing assumes that there are no faults in the logical
+% k-direction and therefore processes only regular connections. In absence
+% of inactive or pinched cells, there should be (20+1+4)x120x40=120000
+% faces (where +4 is due to the artificial cells) in the k-direction. The
+% result of the grid processing is a new structure G, outlined below
+
+G   %#ok  (intentional display)
+
+%% Inspect the whole model
+% Having obtained the grid in the correct unstructured format, we first
+% plot the outline of the whole model and highlight all faults. This model
+% consist of two separated grids so that numel(G)=2
+newplot; subplot('position',[0.025 0.025 0.95 0.95]);
+for i=1:numel(G)
+   plotGrid(G(i),'FaceColor','none','EdgeColor',[0.65 0.65 0.65], ...
+           'EdgeAlpha',0.2);
+   plotFaces(G(i),find(G(i).faces.tag>0),'FaceColor','red','EdgeAlpha',0.1);
+end
+axis off;
+axis auto;
+view(-10,40); zoom(1.0);
+
+%%
+% Then we distinguish the active and inactive cells using the |'FaceColor'|
+% property set to |'none'| for the inactive cells and to |'y'| for the
+% active cells. We notice that that only |G(1)| has active cells, this is
+% indicated with the warning.
+cla;
+for i=1:numel(G)
+   hi = plotGrid(G(i),find(~actnum(G(i).cells.indexMap)), ...
+        'FaceColor','none','EdgeColor',[0.65 0.65 0.65],'EdgeAlpha',0.2);
+   ha = plotGrid(G(i),find( actnum(G(i).cells.indexMap)), ...
+                'FaceColor','y','EdgeAlpha',0.1);
+   axis auto off; view(-10,40); zoom(1.0);
+end
+
+%% Inspect the active model
+% To inspect only the active model, we reset the ACTNUM field to its
+% original values and recreate the grid. Now, inactive cells will be
+% ignored and we therefore get a different unstructured grid.
+% If we include the actnum, G from proccessGRDECL has only one component. 
+grdecl.ACTNUM = actnum; clear actnum;
+G = processGRDECL(grdecl);
+
+%% Partition the grid in logical space
+% We construct a coarse grid by partitioning the grid uniformly as 6x12x3
+% coarse blocks in index space. This process partitions all cells in the
+% logical 40x120x20 grid, including cells that are inactive. The number of
+% active cells within each coarse block is shown in the bar plot below.
+%
+% As we can see from the bar plot, there are several coarse block that
+% contain no active cells. We therefore postprocess the partitioning to
+% remove blocks that contain no active cells, and then renumber the overall
+% partitioning, giving a new total of 201 blocks. The number of blocks is
+% found by |m=max(blockIx)|.
+%
+% Because the partitioning has been performed in logical index space, we
+% have so far disregarded the fact the some of the blocks may contain
+% disconnected cells because of erosion, faults, etc. We therefore
+% postprocess the grid in physical space and split disconnected blocks.
+
+% Partition in index space
+blockIx = partitionUI(G,[6 12 3]); m=max(blockIx);
+newplot, subplot(3,1,1)
+   bar(accumarray(blockIx,1)); set(gca,'XLim',[0 m]);
+   title('Unprocessed');
+
+% Remove blocks containing no active cells
+blockIx = compressPartition(blockIx);
+subplot(3,1,2)
+   bar(accumarray(blockIx,1)); set(gca,'XLim',[0 m]);
+   title('Compressed');
+
+% Split disconnected blocks
+blockIx = processPartition(G,blockIx);
+subplot(3,1,3)
+   bar(accumarray(blockIx,1)); set(gca,'XLim',[0 m]);
+   title('Processed');
+
+assert (all(accumarray(blockIx, 1) > 0))
+
+%%
+% We have now obtained a partitioning consisting of 243 blocks, in which
+% each coarse block consists of a set of connected cells in the fine grid.
+% To show the partitioning, we plot the coarse blocks using a random and
+% cyclic color scheme for the blocks.
+newplot
+subplot('position',[0.025 0.025 0.95 0.95])
+   blockCol = rand(max(blockIx),1)*33;
+   plotCellData(G,mod(blockCol(blockIx),11),'EdgeAlpha',0.1);
+   axis tight off; view(-60,40);zoom(1.0); shading faceted
+
+%%
+% From the plot above, it is not easy to see the shape of the individual
+% coarse blocks. In the next section, we will therefore show some examples
+% of how individual blocks can be visualized. 
+
+
+%% Build the coarse-grid
+% Having obtained a partition we are satisfied with, we build the
+% coarse-grid structure. This structure consists of three parts:
+%
+% * the cell structure giving the number of blocks and the indices of the
+% cells contained in each block
+% * the face structure giving the number of coarse faces and the indices of
+% the neighbouring blocks
+% * a cellFaces array as in the fine-grid structure
+CG = generateCoarseGrid(G, blockIx);
+CG             %#ok  (intentional display)
+CG.cells       %#ok  (intentional display)
+CG.faces       %#ok  (intentional display)
+
+%%
+% Let us now use |CG| to inspect some of the blocks in the coarse grid. To
+% this end, we arbitrarily pick a few blocks and inspect these block and
+% their neighbours. For the first block, we plot the cells and the faces
+% that have been marked as lying on a fault
+clf; plotBlockAndNeighbors(G,CG,48); view(-90,70);
+
+%%
+% For the second block, we only plot the cells and not the faulted faces
+clf; plotBlockAndNeighbors(G,CG,15,'PlotFaults',false); view(90,70);
+
+%%
+% The third set of neighboring blocks contains more faults
+clf; plotBlockAndNeighbors(G,CG,21); view(0,40);
+
+
+%%
+% We end the example by highlighting six representative blocks, including
+% the three blocks we inspected above. Notice that this way of
+% visualization only uses the fine grid and the partition vector, and thus
+% does not require that the coarse-grid structure has been built.
+clf
+blocks = [4, 16,33, 36, 52];
+col = ['b','g','r','c','m','y'];
+axes('position',[0.01 0.25 0.99 0.75]);
+   plotGrid(G,'EdgeColor',[0.75 0.75 0.75],'FaceColor','w','EdgeAlpha',0.1);
+   outlineCoarseGrid(G,blockIx, 'FaceColor', 'none', ...
+                     'LineWidth', 2,'EdgeAlpha',0.1);
+   for i=1:numel(blocks), 
+      plotGrid(G,find(blockIx==blocks(i)),'FaceColor',col(i)); 
+   end
+   axis tight off; view(10,90);
+
+% Plot the chosen 6 coarse blocks
+for i=1:numel(blocks);
+   axes('position',[(i-1)/5 0.02 1/6 0.25]);
+   plotGrid(G,find(blockIx==blocks(i)),'FaceColor',col(i),'EdgeAlpha',0.4);
+   axis tight off, view(0,75), zoom(1.2)
+end
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>

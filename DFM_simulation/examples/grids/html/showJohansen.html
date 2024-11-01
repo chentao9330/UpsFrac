@@ -1,0 +1,259 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Visualizing the Johansen Data Set</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="showJohansen.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Visualizing the Johansen Data Set</h1><!--introduction--><p>The Johansen formation is a candidate site for large-scale CO2 storage offshore the south-west coast of Norway. The <a href="http://www.sintef.no/MatMoRa">MatMoRA project</a> has developed a set of <a href="http://www.sintef.no/Projectweb/MatMorA/Downloads/Johansen/">geological models</a> based on available seismic and well data. Herein, we will inspect one instance of the model in more detail.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Faults and active/inactive cells</a></li><li><a href="#4">Height map</a></li><li><a href="#5">Porosity</a></li><li><a href="#7">Permeability</a></li><li><a href="#10">Well</a></li></ul></div><h2>Faults and active/inactive cells<a name="1"></a></h2><p>We start by reading the model from a file in the Eclipse format (GRDECL), picking the sector model with five vertical layers in the Johansen formation and with five shale layers above and one below.</p><p>The file contains both active and inactive cells. We take the chance that the inactive cells do not contain garbage and visualize the whole model, marking with red color all faults found during processing.</p><pre class="codeinput">clear
+
+<span class="comment">% Load grid geometry - you will most likely have to change the path,</span>
+<span class="comment">% depending upon where you have stored the Johansen data-set</span>
+sector = fullfile(ROOTDIR, <span class="string">'examples'</span>, <span class="string">'data'</span>, <span class="string">'johansen'</span>, <span class="string">'NPD5'</span>);
+filename = [sector, <span class="string">'.grdecl'</span>];
+<span class="keyword">if</span> ~exist(filename, <span class="string">'file'</span>),
+   error(<span class="string">'Johansen data set not found'</span>);
+<span class="keyword">end</span>
+grdecl        = readGRDECL(filename);  clear <span class="string">filename</span>
+actnum        = grdecl.ACTNUM;
+grdecl.ACTNUM = ones(prod(grdecl.cartDims),1);
+G             = processGRDECL(grdecl, <span class="string">'checkgrid'</span>, false);
+</pre><p>Plot the results</p><pre class="codeinput">clf, subplot(<span class="string">'position'</span>,[0.025 0.025 0.95 0.95]);
+plotGrid(G,<span class="string">'FaceColor'</span>,<span class="string">'none'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+plotFaces(G,find(G.faces.tag&gt;0),<span class="string">'FaceColor'</span>,<span class="string">'r'</span>);
+axis <span class="string">tight</span> <span class="string">off</span>; view(-145,60);
+</pre><img vspace="5" hspace="5" src="showJohansen_01.png" alt=""> <p>Next we mark the active part of the model</p><pre class="codeinput">plotGrid(G,find(actnum(G.cells.indexMap)), <span class="keyword">...</span>
+         <span class="string">'FaceColor'</span>, <span class="string">'b'</span>, <span class="string">'FaceAlpha'</span>, 0.4, <span class="string">'EdgeAlpha'</span>, 0.1);
+view(20,75);
+</pre><img vspace="5" hspace="5" src="showJohansen_02.png" alt=""> <h2>Height map<a name="4"></a></h2><p>It is only meaningful to show a height map of the active cells. Therefore, to inspect only the active model, we reset the ACTNUM field to its original values and recreate the grid. Now, inactive cells will be ignored and we therefore get a different unstructured grid.</p><pre class="codeinput">grdecl.ACTNUM = actnum; clear <span class="string">actnum</span>;
+G = processGRDECL(grdecl); clear <span class="string">grdecl</span>;
+G = computeGeometry(G);
+
+<span class="comment">% Plotting a height map of the field using the z-component of the centroids</span>
+<span class="comment">% of the cells</span>
+clf,
+plotCellData(G,G.cells.centroids(:,3),<span class="string">'EdgeColor'</span>,<span class="string">'k'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+colorbar, view(3), axis <span class="string">tight</span> <span class="string">off</span>, view(-20,40), zoom(1.2)
+</pre><img vspace="5" hspace="5" src="showJohansen_03.png" alt=""> <h2>Porosity<a name="5"></a></h2><p>The porosity data are given with one value for each cell in the model. We read all values and then pick only the values corresponding to active cells in the model.</p><pre class="codeinput">clf
+p = reshape(load([sector, <span class="string">'_Porosity.txt'</span>])', prod(G.cartDims), []);
+rock.poro = p(G.cells.indexMap); clear <span class="string">p</span>
+hp = plotCellData(G,rock.poro,<span class="string">'EdgeColor'</span>,<span class="string">'k'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+colorbar; caxis([0.1 0.3]), view(-45,15), axis <span class="string">tight</span> <span class="string">off</span>, zoom(1.2)
+</pre><img vspace="5" hspace="5" src="showJohansen_04.png" alt=""> <p>From the plot, it seems like the formation has been pinched out and only contains the shale layers in the front part of the model. We verify this by plotting a filtered porosity field in which all values smaller than or equal 0.1 have been taken out.</p><pre class="codeinput">delete(hp), view(-15,40)
+plotGrid(G,<span class="string">'FaceColor'</span>,<span class="string">'none'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+plotCellData(G,rock.poro, find(rock.poro&gt;0.1), <span class="keyword">...</span>
+             <span class="string">'EdgeColor'</span>,<span class="string">'k'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+</pre><img vspace="5" hspace="5" src="showJohansen_05.png" alt=""> <h2>Permeability<a name="7"></a></h2><p>The permeability is given as a scalar field (Kx) similarly as the porosity. The tensor is given as K = diag(Kx, Kx, 0.1Kx) and we therefore only plot the x-component, Kx, using a logarithmic color scale.</p><pre class="codeinput">clf
+K = reshape(load([sector, <span class="string">'_Permeability.txt'</span>]')', prod(G.cartDims), []);
+rock.perm = bsxfun(@times, [1 1 0.1], K(G.cells.indexMap)).*milli*darcy; clear <span class="string">K</span>;
+hp = plotCellData(G,log10(rock.perm(:,1)),<span class="string">'EdgeColor'</span>,<span class="string">'k'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+view(-45,15), axis <span class="string">tight</span> <span class="string">off</span>, zoom(1.2)
+
+<span class="comment">% Manipulate the colorbar to get the ticks we want</span>
+h = colorbar;
+cs = [0.01 0.1 1 10 100 1000];
+caxis(log10([min(cs) max(cs)]*milli*darcy));
+set(h, <span class="string">'XTick'</span>, 0.5, <span class="string">'XTickLabel'</span>,<span class="string">'mD'</span>, <span class="keyword">...</span>
+   <span class="string">'YTick'</span>, log10(cs*milli*darcy), <span class="string">'YTickLabel'</span>, num2str(cs'));
+</pre><img vspace="5" hspace="5" src="showJohansen_06.png" alt=""> <p>To show more of the permeability structure, we strip away the shale layers, starting with the layers with lowest permeability on top.</p><pre class="codeinput">delete(hp), view(-20,35)
+plotGrid(G,<span class="string">'FaceColor'</span>,<span class="string">'none'</span>,<span class="string">'EdgeAlpha'</span>,0.1);
+hp = plotCellData(G,log10(rock.perm(:,1)), <span class="keyword">...</span>
+                  find(rock.perm(:,1)&gt;0.01*milli*darcy), <span class="keyword">...</span>
+                  <span class="string">'EdgeColor'</span>,<span class="string">'k'</span>, <span class="string">'EdgeAlpha'</span>, 0.1);
+</pre><img vspace="5" hspace="5" src="showJohansen_07.png" alt=""> <p>Then we also take away the lower shale layer and plot the permeability using a linear color scale.</p><pre class="codeinput">delete(hp);
+hp = plotCellData(G, convertTo(rock.perm(:,1), milli*darcy), <span class="keyword">...</span>
+                  find(rock.perm(:,1)&gt;0.1*milli*darcy), <span class="keyword">...</span>
+                  <span class="string">'EdgeColor'</span>,<span class="string">'k'</span>, <span class="string">'EdgeAlpha'</span>, 0.1);
+caxis <span class="string">auto</span>; colorbar, view(-150,50)
+</pre><img vspace="5" hspace="5" src="showJohansen_08.png" alt=""> <h2>Well<a name="10"></a></h2><p>Finally, we read the well data and plot the injection well at the correct position.</p><pre class="codeinput">w = load([sector, <span class="string">'_Well.txt'</span>]);
+W = verticalWell([], G, rock,  w(1,1), w(1,2), w(1,3):w(1,4),  <span class="keyword">...</span>
+                 <span class="string">'Radius'</span>, 0.1, <span class="string">'name'</span>, <span class="string">'I'</span>);
+plotWell(G,W,<span class="string">'height'</span>,1000,<span class="string">'color'</span>,<span class="string">'r'</span>);
+zoom <span class="string">out</span>
+</pre><img vspace="5" hspace="5" src="showJohansen_09.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Visualizing the Johansen Data Set
+% The Johansen formation is a candidate site for large-scale CO2 storage
+% offshore the south-west coast of Norway. The
+% <http://www.sintef.no/MatMoRa MatMoRA project> has developed a set of
+% <http://www.sintef.no/Projectweb/MatMorA/Downloads/Johansen/ geological
+% models> based on available seismic and well data. Herein, we
+% will inspect one instance of the model in more detail.
+
+
+%% Faults and active/inactive cells
+% We start by reading the model from a file in the Eclipse format (GRDECL),
+% picking the sector model with five vertical layers in the Johansen
+% formation and with five shale layers above and one below.
+%
+% The file contains both active and inactive cells. We take the chance that
+% the inactive cells do not contain garbage and visualize the whole model,
+% marking with red color all faults found during processing.
+clear
+
+% Load grid geometry - you will most likely have to change the path,
+% depending upon where you have stored the Johansen data-set
+sector = fullfile(ROOTDIR, 'examples', 'data', 'johansen', 'NPD5');
+filename = [sector, '.grdecl'];
+if ~exist(filename, 'file'),
+   error('Johansen data set not found');
+end
+grdecl        = readGRDECL(filename);  clear filename
+actnum        = grdecl.ACTNUM;
+grdecl.ACTNUM = ones(prod(grdecl.cartDims),1);
+G             = processGRDECL(grdecl, 'checkgrid', false);
+
+%%
+% Plot the results
+clf, subplot('position',[0.025 0.025 0.95 0.95]);
+plotGrid(G,'FaceColor','none','EdgeAlpha',0.1);
+plotFaces(G,find(G.faces.tag>0),'FaceColor','r');
+axis tight off; view(-145,60);
+
+%%
+% Next we mark the active part of the model
+plotGrid(G,find(actnum(G.cells.indexMap)), ...
+         'FaceColor', 'b', 'FaceAlpha', 0.4, 'EdgeAlpha', 0.1);
+view(20,75);
+
+%% Height map
+% It is only meaningful to show a height map of the active cells.
+% Therefore, to inspect only the active model, we reset the ACTNUM field to
+% its original values and recreate the grid. Now, inactive cells will be
+% ignored and we therefore get a different unstructured grid.
+grdecl.ACTNUM = actnum; clear actnum;
+G = processGRDECL(grdecl); clear grdecl;
+G = computeGeometry(G);
+
+% Plotting a height map of the field using the z-component of the centroids
+% of the cells
+clf,
+plotCellData(G,G.cells.centroids(:,3),'EdgeColor','k','EdgeAlpha',0.1);
+colorbar, view(3), axis tight off, view(-20,40), zoom(1.2)
+
+%% Porosity
+% The porosity data are given with one value for each cell in the model. We
+% read all values and then pick only the values corresponding to active
+% cells in the model.
+clf
+p = reshape(load([sector, '_Porosity.txt'])', prod(G.cartDims), []);
+rock.poro = p(G.cells.indexMap); clear p
+hp = plotCellData(G,rock.poro,'EdgeColor','k','EdgeAlpha',0.1);
+colorbar; caxis([0.1 0.3]), view(-45,15), axis tight off, zoom(1.2)
+
+%%
+% From the plot, it seems like the formation has been pinched out and only
+% contains the shale layers in the front part of the model. We verify this
+% by plotting a filtered porosity field in which all values smaller than or
+% equal 0.1 have been taken out.
+delete(hp), view(-15,40)
+plotGrid(G,'FaceColor','none','EdgeAlpha',0.1);
+plotCellData(G,rock.poro, find(rock.poro>0.1), ...
+             'EdgeColor','k','EdgeAlpha',0.1);
+
+%% Permeability
+% The permeability is given as a scalar field (Kx) similarly as the
+% porosity. The tensor is given as K = diag(Kx, Kx, 0.1Kx) and we therefore
+% only plot the x-component, Kx, using a logarithmic color scale.
+clf
+K = reshape(load([sector, '_Permeability.txt']')', prod(G.cartDims), []);
+rock.perm = bsxfun(@times, [1 1 0.1], K(G.cells.indexMap)).*milli*darcy; clear K;
+hp = plotCellData(G,log10(rock.perm(:,1)),'EdgeColor','k','EdgeAlpha',0.1);
+view(-45,15), axis tight off, zoom(1.2)
+
+% Manipulate the colorbar to get the ticks we want
+h = colorbar;
+cs = [0.01 0.1 1 10 100 1000];
+caxis(log10([min(cs) max(cs)]*milli*darcy));
+set(h, 'XTick', 0.5, 'XTickLabel','mD', ...
+   'YTick', log10(cs*milli*darcy), 'YTickLabel', num2str(cs'));
+
+%%
+% To show more of the permeability structure, we strip away the shale
+% layers, starting with the layers with lowest permeability on top.
+delete(hp), view(-20,35)
+plotGrid(G,'FaceColor','none','EdgeAlpha',0.1);
+hp = plotCellData(G,log10(rock.perm(:,1)), ...
+                  find(rock.perm(:,1)>0.01*milli*darcy), ...
+                  'EdgeColor','k', 'EdgeAlpha', 0.1);
+
+%%
+% Then we also take away the lower shale layer and plot the permeability
+% using a linear color scale.
+delete(hp);
+hp = plotCellData(G, convertTo(rock.perm(:,1), milli*darcy), ...
+                  find(rock.perm(:,1)>0.1*milli*darcy), ...
+                  'EdgeColor','k', 'EdgeAlpha', 0.1);
+caxis auto; colorbar, view(-150,50)
+
+%% Well
+% Finally, we read the well data and plot the injection well at the correct
+% position.
+w = load([sector, '_Well.txt']);
+W = verticalWell([], G, rock,  w(1,1), w(1,2), w(1,3):w(1,4),  ...
+                 'Radius', 0.1, 'name', 'I');
+plotWell(G,W,'height',1000,'color','r');
+zoom out
+
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>

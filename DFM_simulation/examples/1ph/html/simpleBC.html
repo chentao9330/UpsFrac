@@ -1,0 +1,305 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Basic Flow-Solver Tutorial</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleBC.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Basic Flow-Solver Tutorial</h1><!--introduction--><p>The purpose of this example is to give an overview of how to set up and use the single-phase mimetic pressure solver to solve the single-phase pressure equation</p><p><img src="simpleBC_eq25293.png" alt="$$\nabla\cdot v = q, \qquad v=\textbf{--}\frac{K}{\mu}\nabla p,$$"></p><p>for a flow driven by Dirichlet and Neumann boundary conditions. Our geological model will be simple a Cartesian grid with anisotropic, homogeneous permeability.</p><p>In this tutorial example, you will learn about:</p><div><ol><li>the grid structure,</li><li>how to specify rock and fluid data,</li><li>the structure of the data-objects used to hold solution,</li><li>how to assemble and solve linear systems,</li><li>the structure of the mimetic linear systems,</li><li>useful routines for visualizing and interacting with the grids and simulation results.</li></ol></div><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Define geometry</a></li><li><a href="#3">Process geometry</a></li><li><a href="#4">Set rock and fluid data</a></li><li><a href="#5">Initialize reservoir simulator</a></li><li><a href="#6">Impose Dirichlet boundary conditions</a></li><li><a href="#7">Construct linear system</a></li><li><a href="#9">Solve the linear system</a></li><li><a href="#10">Inspect results</a></li></ul></div><h2>Define geometry<a name="1"></a></h2><p>Construct a Cartesian grid of size 10-by-10-by-4 cells, where each cell has dimension 1-by-1-by-1. Because our flow solvers are applicable for general unstructured grids, the Cartesian grid is here represented using <a href="matlab:help('grid_structure')">an unstructured format</a>, in which cells, faces, nodes, etc. are given explicitly.</p><pre class="codeinput">nx = 10; ny = 10; nz = 4;
+G = cartGrid([nx, ny, nz]);
+display(G);
+</pre><pre class="codeoutput">
+G = 
+
+       cells: [1x1 struct]
+       faces: [1x1 struct]
+       nodes: [1x1 struct]
+    cartDims: [10 10 4]
+        type: {'tensorGrid'  'cartGrid'}
+     griddim: 3
+
+</pre><p>After the grid structure is generated, we plot the geometry.</p><pre class="codeinput">plotGrid(G);
+view(3), camproj <span class="string">orthographic</span>, axis <span class="string">tight</span>, camlight <span class="string">headlight</span>
+</pre><img vspace="5" hspace="5" src="simpleBC_01.png" alt=""> <h2>Process geometry<a name="3"></a></h2><p>Having set up the basic structure, we continue to compute centroids and volumes of the cells and centroids, normals, and areas for the faces. For a Cartesian grid, this information can trivially be computed, but is given explicitly so that the flow solver is compatible with fully unstructured grids.</p><pre class="codeinput">G = computeGeometry(G);
+</pre><h2>Set rock and fluid data<a name="4"></a></h2><p>The only parameters in the single-phase pressure equation are the permeability <img src="simpleBC_eq14888.png" alt="$K$"> and the fluid viscosity <img src="simpleBC_eq68803.png" alt="$\mu$">. We set the permeability to be homogeneous and anisotropic</p><p><img src="simpleBC_eq33940.png" alt="$$ K = \left(\begin{array}{ccc}&#xA;     1000 &amp; 0  &amp; 0 \\ 0 &amp; 100 &amp; 0 \\ 0 &amp; 0 &amp; 10 \end{array}\right) $$"></p><p>The viscosity is specified by saying that the reservoir is filled with a <a href="matlab:help('initSinglefluid')">single fluid</a>, for which de default viscosity value equals unity. Our flow solver is written for a general incompressible flow and requires the evaluation of a total mobility, which is provided by the <a href="matlab:help('fluid')">fluid object</a>.</p><pre class="codeinput">rock.perm = repmat([1000, 100, 10].* milli*darcy(), [G.cells.num, 1]);
+fluid     = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+</pre><h2>Initialize reservoir simulator<a name="5"></a></h2><p>To simplify communication among different flow and transport solvers, all unknowns are collected in a structure. Here this structure is initialized with uniform initial reservoir pressure equal 0 and (single-phase) saturation equal 0.0 (using the default behavior of <a href="matlab:help('initResSol')">initResSol</a>)</p><pre class="codeinput">resSol = initResSol(G, 0.0);
+display(resSol);
+</pre><pre class="codeoutput">
+resSol = 
+
+    pressure: [400x1 double]
+        flux: [1380x1 double]
+           s: [400x1 double]
+
+</pre><h2>Impose Dirichlet boundary conditions<a name="6"></a></h2><p>Our flow solvers automatically assume no-flow conditions on all outer (and inner) boundaries; other type of boundary conditions need to be specified explicitly.</p><p>Here, we impose Neumann conditions (flux of 1 m^3/day) on the global left-hand side. The fluxes must be given in units of m^3/s, and thus we need to divide by the number of seconds in a day (<a href="matlab:help('day')">day()</a>).  Similarly, we set Dirichlet boundary conditions p = 0 on the global right-hand side of the grid, respectively. For a single-phase flow, we need not specify the saturation at inflow boundaries. Similarly, fluid composition over outflow faces (here, right) is ignored by pside.</p><pre class="codeinput">bc = fluxside([], G, <span class="string">'LEFT'</span>,  1*meter^3/day());
+bc = pside   (bc, G, <span class="string">'RIGHT'</span>, 0);
+display(bc);
+</pre><pre class="codeoutput">
+bc = 
+
+     face: [80x1 int32]
+     type: {1x80 cell}
+    value: [80x1 double]
+      sat: []
+
+</pre><h2>Construct linear system<a name="7"></a></h2><p>Construct mimetic pressure linear system components for the system Ax = b</p><p><img src="simpleBC_eq11128.png" alt="$$ A x = \left[\begin{array}{ccc}&#xA;                 B &amp; C &amp; D \\ C' &amp; 0 &amp; 0 \\ D' &amp; 0 &amp; 0&#xA;          \end{array}\right]&#xA;          \left[\begin{array}{c} v \\ -p \\ \lambda \end{array}\right]&#xA;        = [\mbox{RHS}] = b $$"></p><p>based on input grid and rock properties for the case with no gravity.</p><pre class="codeinput">gravity <span class="string">off</span>;
+S = computeMimeticIP(G, rock);
+
+<span class="comment">% Plot the structure of the matrix (here we use BI, the inverse of B,</span>
+<span class="comment">% rather than B because the two have exactly the same structure)</span>
+clf, subplot(1,2,1)
+cellNo  = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+C       = sparse(1:numel(cellNo), cellNo, 1);
+D       = sparse(1:numel(cellNo), double(G.cells.faces(:,1)), 1, <span class="keyword">...</span>
+                 numel(cellNo), G.faces.num);
+
+spy([S.BI               , C        , D        ; <span class="keyword">...</span>
+     C', zeros(size(C,2), size(C,2) + size(D,2)); <span class="keyword">...</span>
+     D', zeros(size(D,2), size(C,2) + size(D,2))]);
+title(<span class="string">'Hybrid pressure system matrix'</span>)
+</pre><img vspace="5" hspace="5" src="simpleBC_02.png" alt=""> <p>The block structure can clearly be seen in the sparse matrix A, which is never formed in full. Indeed, rather than storing B, we store its inverse B^-1. Similarly, the C and D blocks are not represented in the <tt>S</tt> structure; they can easily be formed explicitly whenever needed, or their action can easily be computed.</p><pre class="codeinput">display(S);
+</pre><pre class="codeoutput">
+S = 
+
+      BI: [2400x2400 double]
+      ip: 'ip_simple'
+    type: 'hybrid'
+
+</pre><h2>Solve the linear system<a name="9"></a></h2><p>Solve linear system construced from S and bc to obtain solution for flow and pressure in the reservoir. Function solveIncompFlow demands that we pass a well solution structure even if the reservoir has no wells, so we initialize an empty wellSol structure. The <a href="matlab:help('solveIncompFlow')">option</a> 'MatrixOutput=true' adds the system matrix A to resSol to enable inspection of the matrix.</p><pre class="codeinput">resSol = solveIncompFlow(resSol, G, S, fluid, <span class="keyword">...</span>
+                         <span class="string">'bc'</span>, bc, <span class="string">'MatrixOutput'</span>, true);
+display(resSol);
+</pre><pre class="codeoutput">
+resSol = 
+
+        pressure: [400x1 double]
+            flux: [1380x1 double]
+               s: [400x1 double]
+    facePressure: [1380x1 double]
+               A: [1340x1340 double]
+
+</pre><h2>Inspect results<a name="10"></a></h2><p>The  <tt>resSol</tt> object contains the Schur complement matrix used to solve the hybrid system.</p><pre class="codeinput">subplot(1,2,2), spy(resSol.A);
+title(<span class="string">'Schur complement system matrix'</span>);
+</pre><img vspace="5" hspace="5" src="simpleBC_03.png" alt=""> <p>We then plot convert the computed pressure to <a href="matlab:help('units')">unit</a> <a href="matlab:help('barsa')">'bar'</a> before plotting result.</p><pre class="codeinput">clf
+plotCellData(G, convertTo(resSol.pressure(1:G.cells.num), barsa()), <span class="keyword">...</span>
+             <span class="string">'EdgeColor'</span>, <span class="string">'k'</span>);
+title(<span class="string">'Cell Pressure [bar]'</span>)
+xlabel(<span class="string">'x'</span>), ylabel(<span class="string">'y'</span>), zlabel(<span class="string">'Depth'</span>);
+view(3); shading <span class="string">faceted</span>; camproj <span class="string">perspective</span>; axis <span class="string">tight</span>;
+colorbar
+</pre><img vspace="5" hspace="5" src="simpleBC_04.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Basic Flow-Solver Tutorial
+% The purpose of this example is to give an overview of how to set up and
+% use the single-phase mimetic pressure solver to solve the single-phase
+% pressure equation
+%
+% $$\nabla\cdot v = q, \qquad v=\textbf{REPLACE_WITH_DASH_DASH}\frac{K}{\mu}\nabla p,$$
+%
+% for a flow driven by Dirichlet and Neumann boundary conditions. Our
+% geological model will be simple a Cartesian grid with anisotropic,
+% homogeneous permeability.
+%
+% In this tutorial example, you will learn about:
+%
+% # the grid structure,
+% # how to specify rock and fluid data,
+% # the structure of the data-objects used to hold solution,
+% # how to assemble and solve linear systems,
+% # the structure of the mimetic linear systems,
+% # useful routines for visualizing and interacting with the grids and
+% simulation results.
+
+
+%% Define geometry
+% Construct a Cartesian grid of size 10-by-10-by-4 cells, where each cell
+% has dimension 1-by-1-by-1. Because our flow solvers are applicable for
+% general unstructured grids, the Cartesian grid is here represented using
+% <matlab:help('grid_structure') an unstructured format>, in which cells,
+% faces, nodes, etc. are given explicitly.
+nx = 10; ny = 10; nz = 4;
+G = cartGrid([nx, ny, nz]);
+display(G);
+
+%%
+% After the grid structure is generated, we plot the geometry.
+plotGrid(G);
+view(3), camproj orthographic, axis tight, camlight headlight
+
+%% Process geometry
+% Having set up the basic structure, we continue to compute centroids and
+% volumes of the cells and centroids, normals, and areas for the faces. For
+% a Cartesian grid, this information can trivially be computed, but is
+% given explicitly so that the flow solver is compatible with fully
+% unstructured grids.
+G = computeGeometry(G);
+
+
+%% Set rock and fluid data
+% The only parameters in the single-phase pressure equation are the
+% permeability $K$ and the fluid viscosity $\mu$. We set the permeability
+% to be homogeneous and anisotropic
+%
+% $$ K = \left(\begin{array}{ccc}
+%      1000 & 0  & 0 \\ 0 & 100 & 0 \\ 0 & 0 & 10 \end{array}\right) $$
+%
+% The viscosity is specified by saying that the reservoir is filled with a
+% <matlab:help('initSinglefluid') single fluid>, for which de default
+% viscosity value equals unity. Our flow solver is written for a general
+% incompressible flow and requires the evaluation of a total mobility,
+% which is provided by the <matlab:help('fluid') fluid object>.
+rock.perm = repmat([1000, 100, 10].* milli*darcy(), [G.cells.num, 1]);
+fluid     = initSingleFluid('mu' ,    1*centi*poise     , ...
+                            'rho', 1014*kilogram/meter^3);
+
+%% Initialize reservoir simulator
+% To simplify communication among different flow and transport solvers, all
+% unknowns are collected in a structure. Here this structure is initialized
+% with uniform initial reservoir pressure equal 0 and (single-phase)
+% saturation equal 0.0 (using the default behavior of
+% <matlab:help('initResSol') initResSol>)
+resSol = initResSol(G, 0.0);
+display(resSol);
+
+%% Impose Dirichlet boundary conditions
+% Our flow solvers automatically assume no-flow conditions on all outer
+% (and inner) boundaries; other type of boundary conditions need to be
+% specified explicitly.
+%
+% Here, we impose Neumann conditions (flux of 1 m^3/day) on the global
+% left-hand side. The fluxes must be given in units of m^3/s, and thus we
+% need to divide by the number of seconds in a day (<matlab:help('day')
+% day()>).  Similarly, we set Dirichlet boundary conditions p = 0 on the
+% global right-hand side of the grid, respectively. For a single-phase
+% flow, we need not specify the saturation at inflow boundaries. Similarly,
+% fluid composition over outflow faces (here, right) is ignored by pside.
+bc = fluxside([], G, 'LEFT',  1*meter^3/day());
+bc = pside   (bc, G, 'RIGHT', 0);
+display(bc);
+
+%% Construct linear system
+% Construct mimetic pressure linear system components for the system Ax = b
+%
+% $$ A x = \left[\begin{array}{ccc}
+%                  B & C & D \\ C' & 0 & 0 \\ D' & 0 & 0
+%           \end{array}\right]
+%           \left[\begin{array}{c} v \\ -p \\ \lambda \end{array}\right]
+%         = [\mbox{RHS}] = b $$
+%
+% based on input grid and rock properties for the case with no gravity.
+gravity off;
+S = computeMimeticIP(G, rock);
+
+% Plot the structure of the matrix (here we use BI, the inverse of B,
+% rather than B because the two have exactly the same structure)
+clf, subplot(1,2,1)
+cellNo  = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+C       = sparse(1:numel(cellNo), cellNo, 1);
+D       = sparse(1:numel(cellNo), double(G.cells.faces(:,1)), 1, ...
+                 numel(cellNo), G.faces.num);
+
+spy([S.BI               , C        , D        ; ...
+     C', zeros(size(C,2), size(C,2) + size(D,2)); ...
+     D', zeros(size(D,2), size(C,2) + size(D,2))]);
+title('Hybrid pressure system matrix')
+
+%%
+% The block structure can clearly be seen in the sparse matrix A, which is
+% never formed in full. Indeed, rather than storing B, we store its inverse
+% B^-1. Similarly, the C and D blocks are not represented in the |S|
+% structure; they can easily be formed explicitly whenever needed, or their
+% action can easily be computed.
+display(S);
+
+%% Solve the linear system
+% Solve linear system construced from S and bc to obtain solution for flow
+% and pressure in the reservoir. Function solveIncompFlow demands that we
+% pass a well solution structure even if the reservoir has no wells, so we
+% initialize an empty wellSol structure. The
+% <matlab:help('solveIncompFlow') option> 'MatrixOutput=true' adds the
+% system matrix A to resSol to enable inspection of the matrix.
+resSol = solveIncompFlow(resSol, G, S, fluid, ...
+                         'bc', bc, 'MatrixOutput', true);
+display(resSol);
+
+%% Inspect results
+% The  |resSol| object contains the Schur complement matrix used to
+% solve the hybrid system.
+subplot(1,2,2), spy(resSol.A);
+title('Schur complement system matrix');
+
+%%
+% We then plot convert the computed pressure to <matlab:help('units') unit>
+% <matlab:help('barsa') 'bar'> before plotting result.
+clf
+plotCellData(G, convertTo(resSol.pressure(1:G.cells.num), barsa()), ...
+             'EdgeColor', 'k');
+title('Cell Pressure [bar]')
+xlabel('x'), ylabel('y'), zlabel('Depth');
+view(3); shading faceted; camproj perspective; axis tight;
+colorbar
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>

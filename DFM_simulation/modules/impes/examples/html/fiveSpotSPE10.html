@@ -1,0 +1,326 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>fiveSpotSPE10</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="fiveSpotSPE10.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Document example dependcies</a></li><li><a href="#2">Define a oil/gas system</a></li><li><a href="#3">Set up grid and get petrophysical properties.</a></li><li><a href="#4">Show grid and petrophysical properties</a></li><li><a href="#5">Set up four producers at reservoir pressure and an injector at 500 bar</a></li><li><a href="#6">Compute one time values for the IMPES solver</a></li><li><a href="#7">Initialize a oil filled reservoir at 200 bar.</a></li><li><a href="#8">Do actual simulations</a></li></ul></div><h2>Document example dependcies<a name="1"></a></h2><pre class="codeinput">require <span class="string">impes</span> <span class="string">spe10</span> <span class="string">deckformat</span>
+</pre><h2>Define a oil/gas system<a name="2"></a></h2><p>The fluid data is contained in the file 'simpleOilGas.txt'. We read and process this using the deckformat module.</p><pre class="codeinput">current_dir = fileparts(mfilename(<span class="string">'fullpath'</span>));
+f = fullfile(current_dir, <span class="string">'simpleOilGas.txt'</span>);
+deck = readEclipseDeck(f);
+
+<span class="comment">% Once the file has been read, we can use it to create the desired fluid.</span>
+fluid = initEclipseFluid(deck);
+</pre><h2>Set up grid and get petrophysical properties.<a name="3"></a></h2><p>We select three layers to</p><pre class="codeinput">layers = 25:28;
+cartDims = [60, 220, numel(layers)];
+physDims = cartDims.*[20,10,2]*ft;
+rock = SPE10_rock(layers);
+rock.perm = convertFrom(rock.perm, milli*darcy);
+
+gravity <span class="string">off</span>
+
+<span class="comment">% Define a Cartesian Grid based on the SPE layers selected.</span>
+G = cartGrid(cartDims, physDims);
+G = computeGeometry(G);
+
+<span class="comment">% Cells with zero porosity are masked away to the minimum value to get</span>
+<span class="comment">% sensible results.</span>
+is_pos = rock.poro&gt;0;
+rock.poro(~is_pos) = min(rock.poro(is_pos));
+</pre><h2>Show grid and petrophysical properties<a name="4"></a></h2><p>Since the variations are large, use a logarithmic scale for permeability</p><pre class="codeinput">perm = log10(rock.perm);
+c = {<span class="string">'x'</span>, <span class="string">'y'</span>, <span class="string">'z'</span>};
+clf;
+<span class="keyword">for</span> i = 1:3
+    subplot(2,2,i);
+    plotCellData(G, perm(:,i));
+    colorbar();
+    axis <span class="string">equal</span> <span class="string">tight</span>;
+    title(sprintf(<span class="string">'Permeability in %s direction'</span>, c{i}));
+<span class="keyword">end</span>
+<span class="comment">% Plot porosity</span>
+subplot(2,2,4);
+plotCellData(G, rock.poro);
+colorbar();
+axis <span class="string">equal</span> <span class="string">tight</span>;
+title(<span class="string">'Porosity'</span>)
+</pre><img vspace="5" hspace="5" src="fiveSpotSPE10_01.png" alt=""> <h2>Set up four producers at reservoir pressure and an injector at 500 bar<a name="5"></a></h2><pre class="codeinput"><span class="comment">% Initialize empty well structure</span>
+W = [];
+
+<span class="comment">% Add an injector in the middle of the domain based on the midpoints of the</span>
+<span class="comment">% cartesian indices</span>
+midpoint = round(cartDims)./2;
+
+<span class="comment">% Use vertical well, with completion in all layers. To complete in a</span>
+<span class="comment">% different set of layers, enter the indices of the layers in completion</span>
+completion = [];
+W = verticalWell(W, G, rock, midpoint(1), midpoint(2), completion, <span class="keyword">...</span>
+                <span class="string">'Type'</span>, <span class="string">'bhp'</span>,<span class="keyword">...</span><span class="comment">            % Bottom hole pressure well</span>
+                <span class="string">'Val'</span>, 500*barsa,<span class="keyword">...</span><span class="comment">         % Driving pressure</span>
+                <span class="string">'Radius'</span>, .125*meter, <span class="keyword">...</span><span class="comment">    % As per SPE10 Case B</span>
+                <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>,<span class="keyword">...</span><span class="comment"> % Use TPFA inner product</span>
+                <span class="string">'Comp_i'</span>, [0, 1]);           <span class="comment">% Injects only gas</span>
+
+<span class="comment">% We want to place an producer in each corner of the domain, so we iterate</span>
+<span class="comment">% over the corners and add a 200 bar well at each corner.</span>
+h_ind = [1, G.cartDims(1)];
+v_ind = [1, G.cartDims(2)];
+<span class="keyword">for</span> i = 1:2
+    <span class="keyword">for</span> j = 1:2
+        W = verticalWell(W, G, rock, h_ind(i), v_ind(j), [], <span class="keyword">...</span>
+                        <span class="string">'Type'</span>, <span class="string">'bhp'</span>,<span class="keyword">...</span>
+                        <span class="string">'Val'</span>, 200*barsa, <span class="keyword">...</span>
+                        <span class="string">'Radius'</span>, .125*meter, <span class="keyword">...</span>
+                        <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>, <span class="keyword">...</span>
+                        <span class="string">'Comp_i'</span>, [1, 0]);
+    <span class="keyword">end</span>
+<span class="keyword">end</span>
+</pre><h2>Compute one time values for the IMPES solver<a name="6"></a></h2><p>Compute TPFA transmissibilities</p><pre class="codeinput">Trans = computeTrans(G, rock);
+<span class="comment">% Compute pore volume</span>
+PV = poreVolume(G, rock);
+</pre><h2>Initialize a oil filled reservoir at 200 bar.<a name="7"></a></h2><p>Initially, it contains no gas</p><pre class="codeinput">x = initResSolComp(G, W, fluid, 200*barsa, [1, 0]);
+</pre><h2>Do actual simulations<a name="8"></a></h2><p>Simulate 100 days of production</p><pre class="codeinput">dT = 1*day;
+Nt = 100;
+
+f1 = figure(1);
+T  = 0;
+tic()
+<span class="keyword">for</span> kk = 1:Nt,
+   x = impesTPFA(x, G, Trans, fluid, dT, PV, <span class="string">'wells'</span>, W);
+
+    T = T + dT;
+
+    <span class="comment">% We skip drawing the values for the cells containing wells, since they</span>
+    <span class="comment">% are always outliers.</span>
+    notPerf = ~ismember(1:G.cells.num, vertcat(W.cells));
+
+    set(0, <span class="string">'CurrentFigure'</span>, f1);
+    clf;
+
+    <span class="comment">% Plot the pressure.</span>
+    subplot(1,3,1);
+    plotCellData(G, (x.pressure), notPerf);
+    title(<span class="string">'Pressure'</span>)
+    axis <span class="string">equal</span> <span class="string">tight</span>;
+
+    <span class="comment">% Plot the gas saturation</span>
+    subplot(1,3,2);
+    plotCellData(G, log10(x.s(:,2)), notPerf);
+    title(<span class="string">'Saturation (Gas)'</span>)
+    xlabel(sprintf(<span class="string">'T = %1.0f days'</span>, convertTo(T, day)));
+    axis <span class="string">equal</span> <span class="string">tight</span>;
+
+    <span class="comment">% Plot the x component of the permeability</span>
+    subplot(1,3,3);
+    plotCellData(G, log10(rock.perm(:,1)));
+    title(<span class="string">'Permeability (x-direction)'</span>)
+    axis <span class="string">equal</span> <span class="string">tight</span>;
+
+    drawnow
+
+<span class="keyword">end</span>
+toc()
+</pre><pre class="codeoutput">Elapsed time is 167.381557 seconds.
+</pre><img vspace="5" hspace="5" src="fiveSpotSPE10_02.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Document example dependcies
+require impes spe10 deckformat
+
+
+%% Define a oil/gas system
+% The fluid data is contained in the file 'simpleOilGas.txt'. We read and
+% process this using the deckformat module.
+current_dir = fileparts(mfilename('fullpath'));
+f = fullfile(current_dir, 'simpleOilGas.txt');
+deck = readEclipseDeck(f);
+
+% Once the file has been read, we can use it to create the desired fluid.
+fluid = initEclipseFluid(deck);
+
+%% Set up grid and get petrophysical properties.
+% We select three layers to 
+layers = 25:28;
+cartDims = [60, 220, numel(layers)];
+physDims = cartDims.*[20,10,2]*ft;
+rock = SPE10_rock(layers);
+rock.perm = convertFrom(rock.perm, milli*darcy);
+
+gravity off
+
+% Define a Cartesian Grid based on the SPE layers selected.
+G = cartGrid(cartDims, physDims);
+G = computeGeometry(G);
+
+% Cells with zero porosity are masked away to the minimum value to get
+% sensible results.
+is_pos = rock.poro>0;
+rock.poro(~is_pos) = min(rock.poro(is_pos));
+
+%% Show grid and petrophysical properties
+% Since the variations are large, use a logarithmic scale for permeability
+perm = log10(rock.perm);
+c = {'x', 'y', 'z'};
+clf;
+for i = 1:3
+    subplot(2,2,i);
+    plotCellData(G, perm(:,i));
+    colorbar();
+    axis equal tight;
+    title(sprintf('Permeability in %s direction', c{i}));
+end
+% Plot porosity
+subplot(2,2,4);
+plotCellData(G, rock.poro);
+colorbar();
+axis equal tight;
+title('Porosity')
+    
+
+%% Set up four producers at reservoir pressure and an injector at 500 bar
+
+% Initialize empty well structure
+W = [];
+
+% Add an injector in the middle of the domain based on the midpoints of the
+% cartesian indices
+midpoint = round(cartDims)./2;
+
+% Use vertical well, with completion in all layers. To complete in a
+% different set of layers, enter the indices of the layers in completion
+completion = [];
+W = verticalWell(W, G, rock, midpoint(1), midpoint(2), completion, ...
+                'Type', 'bhp',...            % Bottom hole pressure well
+                'Val', 500*barsa,...         % Driving pressure
+                'Radius', .125*meter, ...    % As per SPE10 Case B
+                'InnerProduct', 'ip_tpf',... % Use TPFA inner product
+                'Comp_i', [0, 1]);           % Injects only gas
+
+% We want to place an producer in each corner of the domain, so we iterate
+% over the corners and add a 200 bar well at each corner.
+h_ind = [1, G.cartDims(1)];
+v_ind = [1, G.cartDims(2)];
+for i = 1:2
+    for j = 1:2
+        W = verticalWell(W, G, rock, h_ind(i), v_ind(j), [], ...
+                        'Type', 'bhp',... 
+                        'Val', 200*barsa, ...
+                        'Radius', .125*meter, ...
+                        'InnerProduct', 'ip_tpf', ...
+                        'Comp_i', [1, 0]);
+    end
+end
+
+%% Compute one time values for the IMPES solver
+% Compute TPFA transmissibilities
+Trans = computeTrans(G, rock);
+% Compute pore volume
+PV = poreVolume(G, rock);
+
+%% Initialize a oil filled reservoir at 200 bar.
+% Initially, it contains no gas
+x = initResSolComp(G, W, fluid, 200*barsa, [1, 0]);
+
+%% Do actual simulations
+% Simulate 100 days of production
+dT = 1*day;
+Nt = 100;
+
+f1 = figure(1);
+T  = 0;
+tic()
+for kk = 1:Nt,
+   x = impesTPFA(x, G, Trans, fluid, dT, PV, 'wells', W);
+    
+    T = T + dT;
+    
+    % We skip drawing the values for the cells containing wells, since they
+    % are always outliers.
+    notPerf = ~ismember(1:G.cells.num, vertcat(W.cells));
+    
+    set(0, 'CurrentFigure', f1);
+    clf;
+    
+    % Plot the pressure.
+    subplot(1,3,1);
+    plotCellData(G, (x.pressure), notPerf);
+    title('Pressure')
+    axis equal tight;
+    
+    % Plot the gas saturation
+    subplot(1,3,2);
+    plotCellData(G, log10(x.s(:,2)), notPerf);
+    title('Saturation (Gas)')
+    xlabel(sprintf('T = %1.0f days', convertTo(T, day)));
+    axis equal tight;
+    
+    % Plot the x component of the permeability
+    subplot(1,3,3);
+    plotCellData(G, log10(rock.perm(:,1)));
+    title('Permeability (x-direction)')
+    axis equal tight;
+    
+    drawnow
+
+end
+toc()
+
+##### SOURCE END #####
+--></body></html>

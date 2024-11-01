@@ -1,0 +1,134 @@
+Release Notes for MRST 2012b
+
+Introduction to MRST 2012b
+------------------------------
+
+MRST 2012b is a major release in terms of new features. We especially
+highlight the following new features:
+   * A new module for fully implicit simulators with automatic Jacobian
+     calculations.
+   * A new module for doing flow diagnostics.
+   * A new module for Discrete Fracture Matrix (DFM) simulations.
+   * The previously separate module for vertical equilibrium CO2 models
+     has been integrated into MRST as a regular module.
+
+Acknowledgements
+----------------
+Work by the following developers constitutes this release of MRST
+   * Stein Krogstad
+   * Knut-Andreas Lie
+   * Olav Møyner
+   * Halvor Møll Nilsen
+   * Bård Skaflestad
+
+The developers would also like to acknowledge the following people for
+valuable contributions to this release of MRST
+   * Jostein R. Natvig
+   * Eirik Keilegavlen
+   * Tor Harald Sandve
+   * Jhonatan Camacho
+
+Olav Møyner acted as primary release manager for MRST 2012b.
+
+
+New developments in MRST 2012b
+------------------------------
+We would like to point out a number of new developments in this release
+   * MRST 2012b introduces a framework for creating simulators based on
+     automatic differentiation. This enables fast prototyping of new
+     models for reservoir flow since the computation of Jacobians is
+     done automatically. Included within are three fully implicit
+     simulators which use automatic differentiation:
+       o A black oil simulator (Oil/Water/Gas with gas dissolved in oil)
+       o A oil and water simulator
+       o A oil, water and polymer simulator
+
+     These three simulators use the same functions for most of the
+     solution logic, demonstrating how new models can be implemented
+     rapidly. Included in this framework is a generic Constrained
+     Pressure Residual (CPR) preconditioner which enables the use of
+     specialized elliptic solvers on the pressure system. All the
+     solvers are enabled for use with adjoint optimization, producing
+     analytic derivatives suitable for optimization loops. Additionally,
+     the implementation includes a simple framework for Proper
+     Orthogonal Decomposition (POD) which allows for model reduction
+     based on previous solutions of the same system.
+
+     To activate the fully implicit module, enter
+
+         mrstModule add ad-fi
+
+     Please note that the fully implicit solvers are still under active
+     development. Especially functionality relating to wells and linear
+     equation solvers should be regarded as beta software which is
+     subject to change.
+
+   * A flow diagnostics module that includes tracer partitioning and
+     time of flight calculations for upscaling evaluation and analysis
+     of well effects.
+   * The previously separate vertical-equilibrium module has been
+     integrated into MRST and is released along with the 2012b
+     release. New in this version is an implementation based on
+     saturation values which can be used with existing solvers. A
+     general effort has been done to make the implementation easier to
+     read and maintain.
+   * The upscaling module has been updated with functions for relative
+     permeability upscaling, including functionality for capillary and
+     viscous limits as well as rudimentary support for periodic grids.
+   * A new module for Discrete Fracture Matrix (DFM) simulations
+     contributed by Tor Harald Sandve and Eirik Keilegavlen. This module
+     lets users solve problems involving fractures on unstructured grids
+     and can be loaded with mrstModule add dfm.
+   * Some common MRST idioms have been added to the gridtools module to
+     make prototyping easier for developers unfamiliar with MRST
+     internals. See gridAddHelpers for more information.
+   * A simple volume renderer has been added under the name
+     plotGridVolumes. While computationally more expensive than existing
+     plotting functions, it allows at a glance visualization of inner
+     parts of 3D grids. The syntax is similar to plotCellData.
+   * Support for MRST on Windows has in general been improved as a
+     general effort has been made to repair the build process on Windows
+     for compiled (.mex) files and other utilities using OS specific
+     features.
+   * The deckformat module has been updated with preliminary support for
+     reading restart and summary files. Note that this functionality is
+     not considered mature and is limited to partial support for the
+     version 7 of the EGRID format.
+
+Upgrade Notes
+-------------
+The following user-visible changes have been made to existing functions
+and data structures since the previous release of MRST.
+
+   * The function removeCells now correctly alters geometry fields when
+     given a grid where computeGeometry has been applied.
+   * The function plotWell has been altered to give better default plots
+     when called with default parameters for both realistic and
+     synthetic grids.
+   * The function refineUniform in the agglom module now correctly
+     refines 1xN strips of cells.
+   * Corrected two programming errors in the deckformat module that,
+     together, contributed to a size mismatch and subsequent assignment
+     error when attempting to expand a PVTO table through translating
+     two independent undersaturated data records into earlier records.
+   * The function upscalePerm in the upscaling module now defaults to
+     TPFA discretizations. A new keyword ‘method’ can be used to
+     reselect mimetic discretization for cases when grid orientation
+     effects are significant.
+   * The following files has been moved from the msmfem module to the
+     coarsegrid module:
+        compressPartition
+        partitionCartGrid
+        partitionLayers
+        partitionUI
+        processPartition
+   * The msmfem module is no longer loaded by default. Note that along
+     with the changes to the coarsegrid module, this may mean that
+     existing programs written for MRST now depend on the coarsegrid
+     module. Users should update their files accordingly. If you
+     experience error messages such as
+
+         Undefined function 'partitionUI' for input arguments
+         of type 'struct'.
+
+     this indicates that the script depends on the coarsegrid module.

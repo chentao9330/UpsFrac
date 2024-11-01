@@ -1,0 +1,377 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>simpleCoarseGridExample</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleCoarseGridExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#2">Partition a Cartesian 2D grid</a></li><li><a href="#3">Partition a 3D grid in much the same manner</a></li><li><a href="#4">Create a faulted grid and partition it</a></li><li><a href="#5">Geometry information can be added to a coarse grid</a></li><li><a href="#6">The coarse grid contains maps to fine scale</a></li><li><a href="#7">No need for logical indices</a></li><li><a href="#8">Solvers using coarse grids</a></li></ul></div><pre class="codeinput">require <span class="string">coarsegrid</span>
+</pre><h2>Partition a Cartesian 2D grid<a name="2"></a></h2><p>We use partitionUI which exploits the logical structure and creates a uniform grid in logical space.</p><pre class="codeinput">clf;
+G = cartGrid([20,20]);
+p = partitionUI(G, [5,5]);
+plotCellData(G, p, <span class="string">'EdgeColor'</span>, <span class="string">'w'</span>);
+colorbar
+</pre><img vspace="5" hspace="5" src="simpleCoarseGridExample_01.png" alt=""> <h2>Partition a 3D grid in much the same manner<a name="3"></a></h2><pre class="codeinput">G = cartGrid([20,20,8]);
+p = partitionUI(G, [5,5,3]);
+
+clf
+plotCellData(G, p, <span class="string">'Edgecolor'</span>, <span class="string">'w'</span>)
+view(60,30);
+</pre><img vspace="5" hspace="5" src="simpleCoarseGridExample_02.png" alt=""> <h2>Create a faulted grid and partition it<a name="4"></a></h2><p>We create a grid and partition it logically in ij-space and along specific layers along the k-space.</p><pre class="codeinput">grdecl = simpleGrdecl([10 10 7], .15);
+G = processGRDECL(grdecl);
+<span class="comment">% Layer 1 will go from 1 to 3 - 1, layer 2 from 3 to 6 - 1 and so on</span>
+L = [1 3 6 8];
+<span class="comment">% We can easily find the thickness of the layers</span>
+diff(L) <span class="comment">%#ok intentional display</span>
+
+<span class="comment">% The partition is disconnected across the fault. processPartition can</span>
+<span class="comment">% amend this by adding new coarse blocks.</span>
+p_initial = partitionLayers(G, [5,5], L);
+p = processPartition(G, p_initial);
+
+figure(1);
+clf
+plotCellData(G, mod(p_initial, 7), <span class="string">'Edgecolor'</span>, <span class="string">'w'</span>)
+title([<span class="string">'Before processPartition (Total blocks: '</span> num2str(numel(unique(p_initial))) <span class="string">')'</span>])
+view(60,30);
+
+figure(2);
+clf
+plotCellData(G, mod(p, 7), <span class="string">'Edgecolor'</span>, <span class="string">'w'</span>)
+title([<span class="string">'After processPartition (Total blocks: '</span> num2str(numel(unique(p))) <span class="string">')'</span>])
+view(60,30);
+</pre><pre class="codeoutput">
+ans =
+
+     2     3     2
+
+</pre><img vspace="5" hspace="5" src="simpleCoarseGridExample_03.png" alt=""> <img vspace="5" hspace="5" src="simpleCoarseGridExample_04.png" alt=""> <h2>Geometry information can be added to a coarse grid<a name="5"></a></h2><p>By calling coarsenGeometry on a grid which has been returned from processGeometry, we can get coarse centroids, volumes and so on.</p><pre class="codeinput">G = computeGeometry(G);
+
+CG = generateCoarseGrid(G, p);
+
+CG = coarsenGeometry(CG);
+
+clf
+cg_cent = CG.cells.centroids;
+g_cent = G.cells.centroids;
+hold <span class="string">on</span>;
+plotPts = @(pts, varargin) plot3(pts(:,1), pts(:,2), pts(:,3), varargin{:});
+
+plotPts(cg_cent, <span class="string">'*r'</span>);
+plotPts(g_cent, <span class="string">'.'</span>)
+
+plotGrid(G, <span class="string">'FaceColor'</span>, <span class="string">'none'</span>, <span class="string">'EdgeAlpha'</span>, .1)
+outlineCoarseGrid(G, p, <span class="string">'facealpha'</span>, .1);
+hold <span class="string">off</span>
+view(15,85);
+<span class="comment">% axis tight off</span>
+legend({<span class="string">'Coarse centroids'</span>, <span class="string">'Fine Centroids'</span>}, <span class="string">'Location'</span>, <span class="string">'NorthOutside'</span>)
+</pre><img vspace="5" hspace="5" src="simpleCoarseGridExample_05.png" alt=""> <h2>The coarse grid contains maps to fine scale<a name="6"></a></h2><pre class="codeinput"><span class="comment">%The coarse grid also contains lookup tables for mapping the coarse grid to</span>
+<span class="comment">%fine scales. Here we visualize a single coarse face consisting of several</span>
+<span class="comment">%fine faces along with its neighbors in red and blue respectively on the</span>
+<span class="comment">%fine grid.</span>
+
+i = 300;
+sub = CG.faces.connPos(i):CG.faces.connPos(i+1)-1;
+finefaces = CG.faces.fconn(sub);
+
+neighbors = CG.faces.neighbors(i,:);
+clf
+plotFaces(G, finefaces)
+plotGrid(G, p == neighbors(1), <span class="string">'facec'</span>, <span class="string">'red'</span>, <span class="string">'facea'</span>, .3)
+plotGrid(G, p == neighbors(2), <span class="string">'facec'</span>, <span class="string">'blue'</span>, <span class="string">'facea'</span>, .3)
+view(-50, 10)
+</pre><img vspace="5" hspace="5" src="simpleCoarseGridExample_06.png" alt=""> <h2>No need for logical indices<a name="7"></a></h2><p>The partition vector is just that - a vector with one entry for each fine cell containing the partition the cell belongs to. We can generate an arbitrary coarse grid without using any information relating to a structured grid.</p><p>For instance, if we want to partition a grid uniformly in space based on cell coordinates, the product of two periodic functions will do nicely. We divide the grid into a 3x3 coarse grid in this way by exploiting that the sine function changes sign in intervals of pi.</p><pre class="codeinput">nx = 3; ny = 3;
+
+G = cartGrid([20, 20], [1 1]);
+G = computeGeometry(G);
+
+<span class="comment">% First create the periodic function</span>
+f = @(v) sin(pi*nx*v(:,1)) .* sin(pi*ny*v(:,2));
+<span class="comment">% Evaluate it in the centroids</span>
+fval = f( G.cells.centroids);
+
+<span class="comment">% We divide the grid into two parts based on the sign of the function</span>
+p = double(fval &gt; 0) + 1;
+<span class="comment">% Which is then postprocessed to create connected domains.</span>
+
+p = processPartition(G, p);
+
+<span class="comment">% This vector can generate coarse grids just as partitionUI did.</span>
+CG = generateCoarseGrid(G, p);
+
+clf
+<span class="comment">% Plot the function values</span>
+subplot(1,2,1);
+v = reshape(f(G.cells.centroids), G.cartDims(1), G.cartDims(2));
+surf(v)
+title(<span class="string">'f(x)'</span>)
+subplot(1,2,2);
+<span class="comment">% Plot the resulting partitions</span>
+title(<span class="string">'Resulting partition'</span>)
+plotCellData(G, mod(p, 13), <span class="string">'EdgeColor'</span>, <span class="string">'w'</span>);
+</pre><img vspace="5" hspace="5" src="simpleCoarseGridExample_07.png" alt=""> <h2>Solvers using coarse grids<a name="8"></a></h2><p>Some solvers may use the coarse grids. Utilities such as coarsenBC make it easier to solve problems at several scales.</p><pre class="codeinput"><span class="comment">% Trivial fluid</span>
+fluid = initSingleFluid(<span class="string">'mu'</span>, 1, <span class="string">'rho'</span>, 1);
+
+<span class="comment">% Uniform permeability and a pressure drop</span>
+rock.perm = ones(G.cells.num, 1);
+T = computeTrans(G, rock);
+state = initState(G, [], 0);
+bc = pside([], G, <span class="string">'left'</span>, 100*barsa);
+bc = pside(bc, G, <span class="string">'right'</span>, 0*barsa);
+<span class="comment">% Solve for fine scale</span>
+state = incompTPFA(state, G, T, fluid, <span class="string">'bc'</span>, bc);
+
+<span class="comment">% Use the provided coarse grid</span>
+CG = coarsenGeometry(CG);
+
+<span class="comment">% Create the same trivial permeability. This could be replaced by for</span>
+<span class="comment">% example an upscaling routine from the upscaling module if the</span>
+<span class="comment">% permeability was non-uniform.</span>
+rock.perm = ones(CG.cells.num, 1);
+T_coarse = computeTrans(CG, rock);
+state_coarse = initState(CG, [], 0);
+
+<span class="comment">% Take the existing boundary condition and sample it in the coarse grid.</span>
+bc_coarse = coarsenBC(CG, bc);
+state_coarse = incompTPFA(state_coarse, CG, T_coarse, fluid, <span class="string">'bc'</span>, bc_coarse);
+
+<span class="comment">% Plot the solutions</span>
+subplot(2,1,1)
+plotCellData(G, state.pressure, <span class="string">'edgec'</span>, <span class="string">'k'</span>)
+title(<span class="string">'Fine scale solution'</span>)
+subplot(2,1,2)
+plotCellData(G, state_coarse.pressure(p), <span class="string">'edgec'</span>, <span class="string">'k'</span>)
+title(<span class="string">'Coarse scale solution'</span>)
+</pre><img vspace="5" hspace="5" src="simpleCoarseGridExample_08.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+require coarsegrid
+
+%% Partition a Cartesian 2D grid
+% We use partitionUI which exploits the logical structure and creates a
+% uniform grid in logical space.
+
+clf;
+G = cartGrid([20,20]);
+p = partitionUI(G, [5,5]);
+plotCellData(G, p, 'EdgeColor', 'w');
+colorbar
+
+%% Partition a 3D grid in much the same manner
+G = cartGrid([20,20,8]);
+p = partitionUI(G, [5,5,3]);
+
+clf
+plotCellData(G, p, 'Edgecolor', 'w')
+view(60,30);
+
+%% Create a faulted grid and partition it
+% We create a grid and partition it logically in ij-space and along
+% specific layers along the k-space.
+
+grdecl = simpleGrdecl([10 10 7], .15);
+G = processGRDECL(grdecl);
+% Layer 1 will go from 1 to 3 - 1, layer 2 from 3 to 6 - 1 and so on
+L = [1 3 6 8];
+% We can easily find the thickness of the layers
+diff(L) %#ok intentional display
+
+% The partition is disconnected across the fault. processPartition can
+% amend this by adding new coarse blocks.
+p_initial = partitionLayers(G, [5,5], L);
+p = processPartition(G, p_initial);
+
+figure(1);
+clf
+plotCellData(G, mod(p_initial, 7), 'Edgecolor', 'w')
+title(['Before processPartition (Total blocks: ' num2str(numel(unique(p_initial))) ')'])
+view(60,30);
+
+figure(2);
+clf
+plotCellData(G, mod(p, 7), 'Edgecolor', 'w')
+title(['After processPartition (Total blocks: ' num2str(numel(unique(p))) ')'])
+view(60,30);
+
+%% Geometry information can be added to a coarse grid
+% By calling coarsenGeometry on a grid which has been returned
+% from processGeometry, we can get coarse centroids, volumes and so on.
+G = computeGeometry(G);
+
+CG = generateCoarseGrid(G, p);
+
+CG = coarsenGeometry(CG);
+
+clf
+cg_cent = CG.cells.centroids;
+g_cent = G.cells.centroids;
+hold on;
+plotPts = @(pts, varargin) plot3(pts(:,1), pts(:,2), pts(:,3), varargin{:});
+
+plotPts(cg_cent, '*r');
+plotPts(g_cent, '.')
+
+plotGrid(G, 'FaceColor', 'none', 'EdgeAlpha', .1)
+outlineCoarseGrid(G, p, 'facealpha', .1);
+hold off
+view(15,85);
+% axis tight off
+legend({'Coarse centroids', 'Fine Centroids'}, 'Location', 'NorthOutside')
+
+%% The coarse grid contains maps to fine scale
+%The coarse grid also contains lookup tables for mapping the coarse grid to
+%fine scales. Here we visualize a single coarse face consisting of several
+%fine faces along with its neighbors in red and blue respectively on the
+%fine grid.
+
+i = 300;
+sub = CG.faces.connPos(i):CG.faces.connPos(i+1)-1;
+finefaces = CG.faces.fconn(sub);
+
+neighbors = CG.faces.neighbors(i,:);
+clf
+plotFaces(G, finefaces)
+plotGrid(G, p == neighbors(1), 'facec', 'red', 'facea', .3)
+plotGrid(G, p == neighbors(2), 'facec', 'blue', 'facea', .3)
+view(-50, 10)
+
+%% No need for logical indices
+% The partition vector is just that - a vector with one entry for each fine
+% cell containing the partition the cell belongs to. We can generate an
+% arbitrary coarse grid without using any information relating to a
+% structured grid.
+%
+% For instance, if we want to partition a grid uniformly in space based on
+% cell coordinates, the product of two periodic functions will do nicely.
+% We divide the grid into a 3x3 coarse grid in this way by exploiting that
+% the sine function changes sign in intervals of pi.
+
+nx = 3; ny = 3;
+
+G = cartGrid([20, 20], [1 1]);
+G = computeGeometry(G);
+
+% First create the periodic function
+f = @(v) sin(pi*nx*v(:,1)) .* sin(pi*ny*v(:,2));
+% Evaluate it in the centroids
+fval = f( G.cells.centroids);
+
+% We divide the grid into two parts based on the sign of the function
+p = double(fval > 0) + 1;
+% Which is then postprocessed to create connected domains.
+
+p = processPartition(G, p);
+
+% This vector can generate coarse grids just as partitionUI did.
+CG = generateCoarseGrid(G, p);
+
+clf
+% Plot the function values
+subplot(1,2,1);
+v = reshape(f(G.cells.centroids), G.cartDims(1), G.cartDims(2));
+surf(v)
+title('f(x)')
+subplot(1,2,2);
+% Plot the resulting partitions
+title('Resulting partition')
+plotCellData(G, mod(p, 13), 'EdgeColor', 'w');
+
+
+%% Solvers using coarse grids
+% Some solvers may use the coarse grids. Utilities such as coarsenBC make
+% it easier to solve problems at several scales.
+
+% Trivial fluid
+fluid = initSingleFluid('mu', 1, 'rho', 1);
+
+% Uniform permeability and a pressure drop
+rock.perm = ones(G.cells.num, 1);
+T = computeTrans(G, rock);
+state = initState(G, [], 0);
+bc = pside([], G, 'left', 100*barsa);
+bc = pside(bc, G, 'right', 0*barsa);
+% Solve for fine scale
+state = incompTPFA(state, G, T, fluid, 'bc', bc);
+
+% Use the provided coarse grid
+CG = coarsenGeometry(CG);
+
+% Create the same trivial permeability. This could be replaced by for
+% example an upscaling routine from the upscaling module if the
+% permeability was non-uniform.
+rock.perm = ones(CG.cells.num, 1);
+T_coarse = computeTrans(CG, rock);
+state_coarse = initState(CG, [], 0);
+
+% Take the existing boundary condition and sample it in the coarse grid.
+bc_coarse = coarsenBC(CG, bc);
+state_coarse = incompTPFA(state_coarse, CG, T_coarse, fluid, 'bc', bc_coarse);
+
+% Plot the solutions
+subplot(2,1,1)
+plotCellData(G, state.pressure, 'edgec', 'k')
+title('Fine scale solution')
+subplot(2,1,2)
+plotCellData(G, state_coarse.pressure(p), 'edgec', 'k')
+title('Coarse scale solution')
+
+##### SOURCE END #####
+--></body></html>

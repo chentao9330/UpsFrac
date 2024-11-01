@@ -1,0 +1,316 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>simpleMSSourceExample</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleMSSourceExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#3">Alternative 1:</a></li></ul></div><pre class="codeinput"><span class="keyword">function</span> simpleMSSourceExample(varargin)
+</pre><pre class="codeinput"><span class="comment">% simpleMSSourceExample -- Demonstrate handling of explicit sources in</span>
+<span class="comment">%                          multiscale pressure solvers.</span>
+<span class="comment">%</span>
+<span class="comment">% SYNOPSIS:</span>
+<span class="comment">%   simpleMSSourceExample()</span>
+<span class="comment">%</span>
+<span class="comment">% PARAMETERS:</span>
+<span class="comment">%   None.</span>
+<span class="comment">%</span>
+<span class="comment">% RETURNS:</span>
+<span class="comment">%   Nothing.</span>
+
+
+
+   require <span class="string">coarsegrid</span>
+   cellDims   = [4, 4, 1];
+   coarseDims = [ 2,  2, 1];
+
+   verbose  = true;
+
+   G = cartGrid(cellDims, cellDims);
+   G = computeGeometry(G);
+
+   rock.perm  = repmat(100 * (darcy() / 1000), [G.cells.num, 1]);
+   rock.poro = repmat(0.3,                    [G.cells.num, 1]);
+
+   fluid = initSimpleFluid(<span class="string">'mu'</span> , [   1,  10]*centi*poise     , <span class="keyword">...</span>
+                           <span class="string">'rho'</span>, [1000, 700]*kilogram/meter^3, <span class="keyword">...</span>
+                           <span class="string">'n'</span>  , [   2,   2]);
+   xRef  = initResSol(G, 0.0);
+   xMs   = initResSol(G, 0.0);
+
+   p  = partitionUI(G, coarseDims);
+   p  = processPartition  (G, p, <span class="string">'Verbose'</span>, verbose);
+   CG = generateCoarseGrid(G, p, <span class="string">'Verbose'</span>, verbose);
+
+   S  = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, verbose);
+</pre><pre class="codeoutput">Elapsed time is 0.011823 seconds.
+Using inner product: 'ip_simple'.
+Computing cell inner products ...		Elapsed time is 0.001822 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.000049 seconds.
+</pre><h2>Alternative 1:<a name="3"></a></h2><p>Call addSource before calling generateCoarseSystem: The fine-scale sources will then be put correctly into the coarse system in 'generateCoarseSystem' and basis functions are also generated correctly.</p><pre class="codeinput">   src = addSource([], [1, G.cells.num], <span class="keyword">...</span>
+                   [-1, 1] ./ day(), <span class="string">'sat'</span>, [1, 0, 0; 1, 0, 0]);
+
+   CS = generateCoarseSystem (G, rock, S, CG, ones([G.cells.num, 1]), <span class="keyword">...</span>
+                              <span class="string">'Verbose'</span>, verbose, <span class="string">'src'</span>, src);
+
+   xRef = solveIncompFlow  (xRef, G, S, fluid, <span class="string">'src'</span>, src);
+   xMs  = solveIncompFlowMS(xMs , G, CG, p, S, CS, fluid, <span class="string">'src'</span>, src);
+
+   <span class="comment">% Plot result:</span>
+   plot_res(figure, G, xRef, xMs);
+<span class="comment">%{
+</span><span class="comment">   %% Alternative 2:
+</span><span class="comment">   % Add source/sink by calling putSourceMS can after generateCoarseSystem
+</span><span class="comment">   % is called.
+</span><span class="comment">   % Function 'putSourceMS' will update S, CS and CS.basis. W must be re-assembeled.
+</span><span class="comment">   %
+</span><span class="comment">   src = addSource([], [100; 200], [-1; 1], 'sat', [1, 0, 0; 1, 0, 0]);
+</span><span class="comment">   [S, CS] = putSourceMS(G, S, CG, CS, rock, src);
+</span><span class="comment">
+</span><span class="comment">   xrRef = solveIncompFlow  (xrRef, [], G, S, fluid, ...
+</span><span class="comment">                             'src', src);
+</span><span class="comment">   xrMs  = solveIncompFlowMS(initResSol(G, 0.0), [], ...
+</span><span class="comment">                             G, CG, p, S, CS, fluid, 'src', src)
+</span><span class="comment">
+</span><span class="comment">   % Plot result:
+</span><span class="comment">   plot_res(figure, G, S, xrRef, xrMs);
+</span><span class="comment">
+</span><span class="comment">   %% Remove source/sink
+</span><span class="comment">   [S, CS] = rmSourceMS(G, S, CG, CS, rock, [100 200]);
+</span><span class="comment">   %{
+</span><span class="comment">
+</span><span class="comment">   xrRef = solveIncompFlow  (xrRef, [], G, S, fluid, ...
+</span><span class="comment">                             'src', src);
+</span><span class="comment">   xrMs  = solveIncompFlowMS(initResSol(G, 0.0), [], ...
+</span><span class="comment">                             G, CG, p, S, CS, fluid, 'src', src);
+</span><span class="comment">   %}
+</span><span class="comment">
+</span><span class="comment">   % Plot result:
+</span><span class="comment">   plot_res(figure, G, S, xrRef, xrMs);
+</span><span class="comment">   %}</span>
+</pre><pre class="codeoutput">Computing flux and pressure basis functions... Elapsed time is 0.024504 seconds.
+</pre><img vspace="5" hspace="5" src="simpleMSSourceExample_01.png" alt=""> <pre class="codeinput"><span class="keyword">end</span>
+
+<span class="comment">%--------------------------------------------------------------------------</span>
+<span class="comment">% Helpers follow.</span>
+<span class="comment">%--------------------------------------------------------------------------</span>
+
+<span class="keyword">function</span> plot_res(f, g, xRef, xMs)
+   cellno = rldecode(1 : g.cells.num, diff(g.cells.facePos), 2) .';
+   plt  = @(v) plotCellData(g, v);
+   pres = @(x) plt(convertTo(x.pressure(1:g.cells.num), barsa()));
+   flux = @(x) plt(convertTo(sqrt(accumarray(cellno, <span class="keyword">...</span>
+                                             faceFlux2cellFlux(g, x.flux).^ 2)), <span class="keyword">...</span>
+                             meter^3 / day));
+
+   set(0, <span class="string">'CurrentFigure'</span>, f)
+
+   subplot(2,2,1)
+      pres(xRef); set_view(), title(<span class="string">'Pressure Fine'</span>)
+      cax = caxis; colorbar
+
+   subplot(2,2,2)
+      pres(xMs); set_view(), title(<span class="string">'Pressure Coarse'</span>)
+      caxis(cax), colorbar
+
+   subplot(2,2,3)
+      flux(xRef); set_view(), title(<span class="string">'Flux intensity Fine'</span>)
+      cax2 = caxis; colorbar
+
+   subplot(2,2,4)
+      flux(xMs); set_view(), title(<span class="string">'Flux intensity Coarse'</span>)
+      caxis(cax2), colorbar
+<span class="keyword">end</span>
+
+<span class="comment">%--------------------------------------------------------------------------</span>
+
+<span class="keyword">function</span> set_view()
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+<span class="keyword">end</span>
+</pre><p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+function simpleMSSourceExample(varargin)
+% simpleMSSourceExample REPLACE_WITH_DASH_DASH Demonstrate handling of explicit sources in
+%                          multiscale pressure solvers.
+%
+% SYNOPSIS:
+%   simpleMSSourceExample()
+%
+% PARAMETERS:
+%   None.
+%
+% RETURNS:
+%   Nothing.
+
+% $Date: 2012-10-02 10:13:00 +0200 (Tue, 02 Oct 2012) $
+% $Revision: 9917 $
+   require coarsegrid
+   cellDims   = [4, 4, 1];
+   coarseDims = [ 2,  2, 1];
+
+   verbose  = true;
+
+   G = cartGrid(cellDims, cellDims);
+   G = computeGeometry(G);
+
+   rock.perm  = repmat(100 * (darcy() / 1000), [G.cells.num, 1]);
+   rock.poro = repmat(0.3,                    [G.cells.num, 1]);
+
+   fluid = initSimpleFluid('mu' , [   1,  10]*centi*poise     , ...
+                           'rho', [1000, 700]*kilogram/meter^3, ...
+                           'n'  , [   2,   2]);
+   xRef  = initResSol(G, 0.0);
+   xMs   = initResSol(G, 0.0);
+
+   p  = partitionUI(G, coarseDims);
+   p  = processPartition  (G, p, 'Verbose', verbose);
+   CG = generateCoarseGrid(G, p, 'Verbose', verbose);
+
+   S  = computeMimeticIP(G, rock, 'Verbose', verbose);
+
+   %% Alternative 1:
+   % Call addSource before calling generateCoarseSystem:
+   % The fine-scale sources will then be put correctly into the coarse
+   % system in 'generateCoarseSystem' and basis functions are also
+   % generated correctly.
+   %
+   src = addSource([], [1, G.cells.num], ...
+                   [-1, 1] ./ day(), 'sat', [1, 0, 0; 1, 0, 0]);
+
+   CS = generateCoarseSystem (G, rock, S, CG, ones([G.cells.num, 1]), ...
+                              'Verbose', verbose, 'src', src);
+
+   xRef = solveIncompFlow  (xRef, G, S, fluid, 'src', src);
+   xMs  = solveIncompFlowMS(xMs , G, CG, p, S, CS, fluid, 'src', src);
+
+   % Plot result:
+   plot_res(figure, G, xRef, xMs);
+%{
+   %% Alternative 2:
+   % Add source/sink by calling putSourceMS can after generateCoarseSystem
+   % is called.
+   % Function 'putSourceMS' will update S, CS and CS.basis. W must be re-assembeled.
+   %
+   src = addSource([], [100; 200], [-1; 1], 'sat', [1, 0, 0; 1, 0, 0]);
+   [S, CS] = putSourceMS(G, S, CG, CS, rock, src);
+   
+   xrRef = solveIncompFlow  (xrRef, [], G, S, fluid, ...
+                             'src', src);
+   xrMs  = solveIncompFlowMS(initResSol(G, 0.0), [], ...
+                             G, CG, p, S, CS, fluid, 'src', src)
+   
+   % Plot result:
+   plot_res(figure, G, S, xrRef, xrMs);
+
+   %% Remove source/sink
+   [S, CS] = rmSourceMS(G, S, CG, CS, rock, [100 200]);
+   %{
+
+   xrRef = solveIncompFlow  (xrRef, [], G, S, fluid, ...
+                             'src', src);
+   xrMs  = solveIncompFlowMS(initResSol(G, 0.0), [], ...
+                             G, CG, p, S, CS, fluid, 'src', src);   
+   %}
+
+   % Plot result:
+   plot_res(figure, G, S, xrRef, xrMs);
+   %}
+end
+
+%REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH
+% Helpers follow.
+%REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH
+
+function plot_res(f, g, xRef, xMs)
+   cellno = rldecode(1 : g.cells.num, diff(g.cells.facePos), 2) .';
+   plt  = @(v) plotCellData(g, v);
+   pres = @(x) plt(convertTo(x.pressure(1:g.cells.num), barsa()));
+   flux = @(x) plt(convertTo(sqrt(accumarray(cellno, ...
+                                             faceFlux2cellFlux(g, x.flux).^ 2)), ...
+                             meter^3 / day));
+
+   set(0, 'CurrentFigure', f)
+
+   subplot(2,2,1)
+      pres(xRef); set_view(), title('Pressure Fine')
+      cax = caxis; colorbar
+
+   subplot(2,2,2)
+      pres(xMs); set_view(), title('Pressure Coarse')
+      caxis(cax), colorbar
+
+   subplot(2,2,3)
+      flux(xRef); set_view(), title('Flux intensity Fine')
+      cax2 = caxis; colorbar
+
+   subplot(2,2,4)
+      flux(xMs); set_view(), title('Flux intensity Coarse')
+      caxis(cax2), colorbar
+end
+
+%REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH
+
+function set_view()
+   view(3), camproj perspective, axis tight equal, camlight headlight
+end
+
+##### SOURCE END #####
+--></body></html>

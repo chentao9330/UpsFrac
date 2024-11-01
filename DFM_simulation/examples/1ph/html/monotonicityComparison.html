@@ -1,0 +1,395 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Compare Mimetic, MPFA and TPA Pressures Solvers</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="monotonicityComparison.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Compare Mimetic, MPFA and TPA Pressures Solvers</h1><!--introduction--><p>Use the two-point flux approximation (TPFA) method, multi-point flux approximations methods and Mimetic methods to solve the single-phase pressure equation</p><p><img src="monotonicityComparison_eq25293.png" alt="$$\nabla\cdot v = q, \qquad v=\textbf{--}\frac{K}{\mu}\nabla p,$$"></p><p>for a two-dimensional Cartesian grid with anisotropic but homogeneous permeability, a single well and zro Dirichlet boundary conditions. The problem solved in this example is the same as in the tutorial <a href="monotonicityExample.html">"Comparing Monotonicity"</a>, and more a detailed description of the model setup is shown there.</p><p>The main idea of the TPFA method is to approximate the flux v over a face f by the difference of the cell centered pressures in the neighboring cells (sharing the face f) weigthed by a face transmissibility T:</p><p><img src="monotonicityComparison_eq04431.png" alt="$$ v_{ij} = T_{ij}(p_i \textbf{--} p_j).$$"></p><p>The pressure in each cell is approximated by solving a linear system Ap = b. When ignoring wells, sources, and bc, A and b are given by</p><p><img src="monotonicityComparison_eq15736.png" alt="$$ a_{ik} = \left\{\begin{array}{cc}&#xA;             \sum_j t_{ij}  &amp; \textrm{if } i=k, \\&#xA;             -t_{ij} &amp;  \textrm{if }\, i\neq k,&#xA;             \end{array} \right. \quad&#xA;             \textrm{and} \quad b_i = \int_{i} q \, dx. $$"></p><p>Once the pressure is known, the flux is calculated using the expression given above.</p><p>In the same manner, the MPFA method approximate the flux v over a face f as a linear combination of the cell pressure and cell pressures in neighbor cells sharing at least one vertex with the face f.</p><p>The mimetic method approximates the face flux as a linear combination of cell pressures and face pressures.  Only in special cases is it possible to make a local stencil for the face flux in terms of cell pressures, while the stencil for the flux in terms of face pressures is always local.</p><p>In this example we show non-monotone solutions to the pressure equation that arise from both the MPFA-method and the Mimetic method.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Define and process geometry</a></li><li><a href="#2">Set rock and fluid data</a></li><li><a href="#3">Introduce wells</a></li><li><a href="#5">Impose Dirichlet boundary conditions</a></li><li><a href="#6">APPROACH 1: Direct/Classic TPFA</a></li><li><a href="#8">APPROACH 2: Mimetic with TPFA-inner product</a></li><li><a href="#11">APPROACH 2: MPFA method</a></li></ul></div><h2>Define and process geometry<a name="1"></a></h2><p>Construct a Cartesian grid of size 10-by-10-by-4 cells, where each cell has dimension 1-by-1-by-1. Because our flow solvers are applicable for general unstructured grids, the Cartesian grid is here represented using an unstructured formate in which cells, faces, nodes, etc. are given explicitly.</p><pre class="codeinput">nx = 11; ny = 11;
+
+G = cartGrid([nx, ny]);
+G = computeGeometry(G, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Computing normals, areas, and centroids...	Elapsed time is 0.000088 seconds.
+Computing cell volumes and centroids...		Elapsed time is 0.000381 seconds.
+</pre><h2>Set rock and fluid data<a name="2"></a></h2><p>The only parameters in the single-phase pressure equation are the permeability <img src="monotonicityComparison_eq14888.png" alt="$K$">, which here is homogeneous, isotropic and equal 100 mD. The fluid has density 1000 kg/m^3 and viscosity 1 cP. We make a non diagonal rock tensor</p><pre class="codeinput">theta=30*pi/180;
+U=[cos(theta),sin(theta);-sin(theta),cos(theta)];
+rocktensor = U'*diag([0.1,100])*U;
+rocktensor =[rocktensor(1,1),rocktensor(1,2),rocktensor(2,2)];
+<span class="comment">%rocktensor =[rocktensor(1,1),rocktensor(2,2)];</span>
+<span class="comment">%rock.perm = repmat(100, [G.cells.num, 1]) .* 1e-3*darcy();</span>
+rock.perm = repmat(rocktensor, [G.cells.num, 1]) .* 1e-3*darcy();
+fluid     = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+
+gravity <span class="string">off</span>
+</pre><h2>Introduce wells<a name="3"></a></h2><p>We will include two wells, one rate-controlled vertical well and one horizontal well controlled by bottom-hole pressure. Wells are described using a Peacemann model, giving an extra set of equations that need to be assembled. We need to specify ('InnerProduct', 'ip_tpf') to get the correct well model for TPFA.</p><p>The first well is vertical well (vertical is default):</p><div><ul><li>completion in cells: cellsWell1</li><li>controlled by production rate = 1.0  [m^3/d]</li><li>radius = 0.1.                        [m]</li></ul></div><pre class="codeinput">cellsWell1 =  sub2ind(G.cartDims,floor(nx/2)+1,floor(ny/2)+1);
+radius     = .1;
+<span class="comment">% well with wellindex calculated for TPFA</span>
+bhp=1;
+W = addWell([], G, rock, cellsWell1,          <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span>, <span class="string">'Val'</span>, bhp*barsa(), <span class="keyword">...</span>
+            <span class="string">'Radius'</span>, radius, <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>);
+<span class="comment">% well with wellindex calculated for MIMETIC</span>
+W_mim = addWell([], G, rock, cellsWell1,          <span class="keyword">...</span>
+            <span class="string">'Type'</span>, <span class="string">'bhp'</span>, <span class="string">'Val'</span>, bhp*barsa(), <span class="keyword">...</span>
+            <span class="string">'Radius'</span>, radius, <span class="string">'InnerProduct'</span>, <span class="string">'ip_simple'</span>);
+</pre><pre>The second well is horizontal in the 'y' direction:</pre><div><ul><li>completion in cells: cellsWell2</li><li>controlled by bottom hole pressure, bhp = 1e5 [Pa]</li><li>radius = 0.1                                  [m]</li></ul></div><h2>Impose Dirichlet boundary conditions<a name="5"></a></h2><p>Our flow solvers automatically assume no-flow conditions on all outer (and inner) boundaries; other type of boundary conditions need to be specified explicitly.</p><p>Here, we impose Neumann conditions (flux of 1 m^3/day) on the global left-hand side. The fluxes must be given in units of m^3/s, and thus we need to divide by the number of seconds in a day (<a href="matlab:help('day')">day()</a>).  Similarly, we set Dirichlet boundary conditions p = 0 on the global right-hand side of the grid, respectively. For a single-phase flow, we need not specify the saturation at inflow boundaries. Similarly, fluid composition over outflow faces (here, right) is ignored by pside.</p><pre class="codeinput">bc = pside([], G, <span class="string">'LEFT'</span>,  0);
+bc = pside(bc, G, <span class="string">'RIGHT'</span>, 0);
+bc = pside(bc, G, <span class="string">'BACK'</span>, 0);
+bc = pside(bc, G, <span class="string">'FRONT'</span>, 0);
+display(bc);
+</pre><pre class="codeoutput">
+bc = 
+
+     face: [44x1 int32]
+     type: {1x44 cell}
+    value: [44x1 double]
+      sat: []
+
+</pre><h2>APPROACH 1: Direct/Classic TPFA<a name="6"></a></h2><p>Initialize solution structure with reservoir pressure equal 0. Compute one-sided transmissibilities for each face of the grid from input grid and rock properties. The harmonic averages of ones-sided transmissibilities are computed in the solver incompTPFA.</p><pre class="codeinput">T = computeTrans(G, rock, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Computing one-sided transmissibilities...	Elapsed time is 0.000365 seconds.
+</pre><p>Initialize well solution structure (with correct bhp). No need to assemble well system (wells are added to the linear system inside the incompTPFA-solver).</p><pre class="codeinput">resSol1 = initState(G, W, 0);
+
+<span class="comment">% Solve linear system construced from T and W to obtain solution for flow</span>
+<span class="comment">% and pressure in the reservoir and the wells. Notice that the TPFA solver</span>
+<span class="comment">% is different from the one used for mimetic systems.</span>
+resSol1 = incompTPFA(resSol1, G, T, fluid, <span class="string">'wells'</span>, W, <span class="string">'Verbose'</span>, true,<span class="string">'bc'</span>,bc);
+</pre><pre class="codeoutput">Setting up linear system...			Elapsed time is 0.001139 seconds.
+Solving linear system...			Elapsed time is 0.000196 seconds.
+Computing fluxes, face pressures etc...		Elapsed time is 0.000266 seconds.
+</pre><h2>APPROACH 2: Mimetic with TPFA-inner product<a name="8"></a></h2><p>Initialize solution structure with reservoir pressure equal 0. Compute the mimetic inner product from input grid and rock properties.</p><pre class="codeinput">IP = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, true, <span class="keyword">...</span>
+                      <span class="string">'InnerProduct'</span>, <span class="string">'ip_simple'</span>);
+</pre><pre class="codeoutput">Using inner product: 'ip_simple'.
+Computing cell inner products ...		Elapsed time is 0.010450 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.000084 seconds.
+</pre><p>Generate the components of the mimetic linear system corresponding to the two wells and initialize the solution structure (with correct bhp)</p><pre class="codeinput">resSol2 = initState(G, W, 0);
+</pre><p>Solve mimetic linear hybrid system</p><pre class="codeinput">resSol2 = solveIncompFlow(resSol2, G, IP, fluid, <span class="string">'wells'</span>, W_mim,<span class="string">'bc'</span>,bc);
+</pre><h2>APPROACH 2: MPFA method<a name="11"></a></h2><p>Initialize solution structure with reservoir pressure equal 0. Compute the transmisibility matrix for mpfa</p><pre class="codeinput">MODS = mrstModule;
+mrstModule <span class="string">add</span> <span class="string">mpfa</span>
+
+T_mpfa = computeMultiPointTrans(G, rock, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Computing mappings between for subfaces ...	Elapsed time is 0.000947 seconds.
+Computing inner product on sub-half-faces ...	Elapsed time is 0.014097 seconds.
+Computing inverse mixed innerproduct ...	Elapsed time is 0.005151 seconds.
+Computing multi-point transmissibilities ...	Elapsed time is 0.000291 seconds.
+</pre><p>Generate the components of the mimetic linear system corresponding to the two wells and initialize the solution structure (with correct bhp) We can use the same well structure as for TPFA</p><pre class="codeinput">resSol3 = initState(G, W, 0);
+</pre><p>Solve mimetic linear hybrid system</p><pre class="codeinput">resSol3 = incompMPFA(resSol3, G, T_mpfa, fluid, <span class="string">'wells'</span>, W,<span class="string">'bc'</span>,bc);
+</pre><p>Plot the pressure and producer inflow profile make caresian grid</p><pre class="codeinput">X=reshape(G.cells.centroids(:,1),G.cartDims);
+Y=reshape(G.cells.centroids(:,2),G.cartDims);
+clf
+subplot(2,3,1)
+   plotCellData(G, resSol1.pressure(1:G.cells.num) ./ barsa());
+   title(<span class="string">'Pressure: direct TPFA'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+   colorbar;
+subplot(2,3,4)
+cellflux1 = reshape(faceFlux2cellFlux(G,resSol1.flux),4,G.cells.num)';
+mesh(X,Y,reshape(resSol1.pressure(1:G.cells.num) ./ barsa(),G.cartDims));
+subplot(2,3,2)
+   plotCellData(G, resSol2.pressure(1:G.cells.num) ./ barsa());
+   title(<span class="string">'Pressure: mimetic'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+   colorbar;
+subplot(2,3,5)
+mesh(X,Y,reshape(resSol2.pressure(1:G.cells.num) ./ barsa(),G.cartDims));
+cellflux2 = reshape(faceFlux2cellFlux(G,resSol2.flux),4,G.cells.num)';
+
+subplot(2,3,3)
+   plotCellData(G, resSol3.pressure(1:G.cells.num) ./ barsa());
+   title(<span class="string">'Pressure: mpfa'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+   colorbar;
+subplot(2,3,6)
+cellflux3 = reshape(faceFlux2cellFlux(G,resSol3.flux),4,G.cells.num)';
+mesh(X,Y,reshape(resSol3.pressure(1:G.cells.num) ./ barsa(),G.cartDims));
+</pre><img vspace="5" hspace="5" src="monotonicityComparison_01.png" alt=""> <p>display the flux in the well for tpfa, mimetic and mpfa</p><pre class="codeinput">    disp([<span class="string">'Flux tpfa '</span>,num2str(resSol1.wellSol(1).flux .* day())]);
+    disp([<span class="string">'Flux mimetic '</span>,num2str(resSol2.wellSol(1).flux .* day())]);
+    disp([<span class="string">'Flux mpfa '</span>,num2str(resSol3.wellSol(1).flux .* day())]);
+</pre><pre class="codeoutput">Flux tpfa 0.59397
+Flux mimetic 0.32018
+Flux mpfa 0.17445
+</pre><pre class="codeinput">mrstModule <span class="string">clear</span>
+mrstModule(<span class="string">'add'</span>, MODS{:})
+</pre><p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Compare Mimetic, MPFA and TPA Pressures Solvers
+% Use the two-point flux approximation (TPFA) method, multi-point flux
+% approximations methods and Mimetic methods to solve the single-phase
+% pressure equation
+%
+% $$\nabla\cdot v = q, \qquad v=\textbf{REPLACE_WITH_DASH_DASH}\frac{K}{\mu}\nabla p,$$
+%
+% for a two-dimensional Cartesian grid with anisotropic but homogeneous
+% permeability, a single well and zro Dirichlet boundary conditions. The
+% problem solved in this example is the same as in the tutorial
+% <monotonicityExample.html "Comparing Monotonicity">, and more a detailed
+% description of the model setup is shown there.
+%
+% The main idea of the TPFA method is to approximate the flux v over a face
+% f by the difference of the cell centered pressures in the neighboring
+% cells (sharing the face f) weigthed by a face transmissibility T:
+%
+% $$ v_{ij} = T_{ij}(p_i \textbf{REPLACE_WITH_DASH_DASH} p_j).$$
+%
+% The pressure in each cell is approximated by solving a linear system
+% Ap = b. When ignoring wells, sources, and bc, A and b are given by
+%
+% $$ a_{ik} = \left\{\begin{array}{cc}
+%              \sum_j t_{ij}  & \textrm{if } i=k, \\
+%              -t_{ij} &  \textrm{if }\, i\neq k,
+%              \end{array} \right. \quad
+%              \textrm{and} \quad b_i = \int_{i} q \, dx. $$
+%
+% Once the pressure is known, the flux is calculated using the expression
+% given above.
+%
+% In the same manner, the MPFA method approximate the flux v over a face f
+% as a linear combination of the cell pressure and cell pressures in
+% neighbor cells sharing at least one vertex with the face f.
+%
+% The mimetic method approximates the face flux as a linear combination of
+% cell pressures and face pressures.  Only in special cases is it possible
+% to make a local stencil for the face flux in terms of cell pressures,
+% while the stencil for the flux in terms of face pressures is always local.
+%
+% In this example we show non-monotone solutions to the pressure equation
+% that arise from both the MPFA-method and the Mimetic method.
+
+%% Define and process geometry
+% Construct a Cartesian grid of size 10-by-10-by-4 cells, where each cell
+% has dimension 1-by-1-by-1. Because our flow solvers are applicable for
+% general unstructured grids, the Cartesian grid is here represented using
+% an unstructured formate in which cells, faces, nodes, etc. are given
+% explicitly.
+nx = 11; ny = 11;
+
+G = cartGrid([nx, ny]);
+G = computeGeometry(G, 'Verbose', true);
+
+%% Set rock and fluid data
+% The only parameters in the single-phase pressure equation are the
+% permeability $K$, which here is homogeneous, isotropic and equal 100 mD.
+% The fluid has density 1000 kg/m^3 and viscosity 1 cP.
+% We make a non diagonal rock tensor
+theta=30*pi/180;
+U=[cos(theta),sin(theta);-sin(theta),cos(theta)];
+rocktensor = U'*diag([0.1,100])*U;
+rocktensor =[rocktensor(1,1),rocktensor(1,2),rocktensor(2,2)];
+%rocktensor =[rocktensor(1,1),rocktensor(2,2)];
+%rock.perm = repmat(100, [G.cells.num, 1]) .* 1e-3*darcy();
+rock.perm = repmat(rocktensor, [G.cells.num, 1]) .* 1e-3*darcy();
+fluid     = initSingleFluid('mu' ,    1*centi*poise     , ...
+                            'rho', 1014*kilogram/meter^3);
+
+gravity off
+
+%% Introduce wells
+% We will include two wells, one rate-controlled vertical well and one
+% horizontal well controlled by bottom-hole pressure. Wells are described
+% using a Peacemann model, giving an extra set of equations that need to be
+% assembled. We need to specify ('InnerProduct', 'ip_tpf') to get the
+% correct well model for TPFA.
+%
+% The first well is vertical well (vertical is default):
+%
+% * completion in cells: cellsWell1
+% * controlled by production rate = 1.0  [m^3/d]
+% * radius = 0.1.                        [m]
+%
+cellsWell1 =  sub2ind(G.cartDims,floor(nx/2)+1,floor(ny/2)+1);
+radius     = .1;
+% well with wellindex calculated for TPFA
+bhp=1;
+W = addWell([], G, rock, cellsWell1,          ...
+            'Type', 'bhp', 'Val', bhp*barsa(), ...
+            'Radius', radius, 'InnerProduct', 'ip_tpf');
+% well with wellindex calculated for MIMETIC
+W_mim = addWell([], G, rock, cellsWell1,          ...
+            'Type', 'bhp', 'Val', bhp*barsa(), ...
+            'Radius', radius, 'InnerProduct', 'ip_simple');        
+
+%%
+%  The second well is horizontal in the 'y' direction:
+%
+% * completion in cells: cellsWell2
+% * controlled by bottom hole pressure, bhp = 1e5 [Pa]
+% * radius = 0.1                                  [m]
+%
+
+%% Impose Dirichlet boundary conditions
+% Our flow solvers automatically assume no-flow conditions on all outer
+% (and inner) boundaries; other type of boundary conditions need to be
+% specified explicitly.
+%
+% Here, we impose Neumann conditions (flux of 1 m^3/day) on the global
+% left-hand side. The fluxes must be given in units of m^3/s, and thus we
+% need to divide by the number of seconds in a day (<matlab:help('day')
+% day()>).  Similarly, we set Dirichlet boundary conditions p = 0 on the
+% global right-hand side of the grid, respectively. For a single-phase
+% flow, we need not specify the saturation at inflow boundaries. Similarly,
+% fluid composition over outflow faces (here, right) is ignored by pside.
+bc = pside([], G, 'LEFT',  0);
+bc = pside(bc, G, 'RIGHT', 0);
+bc = pside(bc, G, 'BACK', 0);
+bc = pside(bc, G, 'FRONT', 0);
+display(bc);
+
+%% APPROACH 1: Direct/Classic TPFA
+% Initialize solution structure with reservoir pressure equal 0. Compute
+% one-sided transmissibilities for each face of the grid from input grid
+% and rock properties. The harmonic averages of ones-sided
+% transmissibilities are computed in the solver incompTPFA.
+T = computeTrans(G, rock, 'Verbose', true);
+
+%%
+% Initialize well solution structure (with correct bhp).
+% No need to assemble well system (wells are added to the linear system
+% inside the incompTPFA-solver).
+resSol1 = initState(G, W, 0);
+
+% Solve linear system construced from T and W to obtain solution for flow
+% and pressure in the reservoir and the wells. Notice that the TPFA solver
+% is different from the one used for mimetic systems.
+resSol1 = incompTPFA(resSol1, G, T, fluid, 'wells', W, 'Verbose', true,'bc',bc);
+
+
+%% APPROACH 2: Mimetic with TPFA-inner product
+% Initialize solution structure with reservoir pressure equal 0. Compute
+% the mimetic inner product from input grid and rock properties.
+IP = computeMimeticIP(G, rock, 'Verbose', true, ...
+                      'InnerProduct', 'ip_simple');
+
+%%
+% Generate the components of the mimetic linear system corresponding to the
+% two wells and initialize the solution structure (with correct bhp)
+resSol2 = initState(G, W, 0);
+
+%%
+% Solve mimetic linear hybrid system
+resSol2 = solveIncompFlow(resSol2, G, IP, fluid, 'wells', W_mim,'bc',bc);
+%% APPROACH 2: MPFA method
+% Initialize solution structure with reservoir pressure equal 0.
+% Compute the transmisibility matrix for mpfa
+
+MODS = mrstModule;
+mrstModule add mpfa
+
+T_mpfa = computeMultiPointTrans(G, rock, 'Verbose', true);
+
+%%
+% Generate the components of the mimetic linear system corresponding to the
+% two wells and initialize the solution structure (with correct bhp)
+% We can use the same well structure as for TPFA
+resSol3 = initState(G, W, 0);
+
+%%
+% Solve mimetic linear hybrid system
+resSol3 = incompMPFA(resSol3, G, T_mpfa, fluid, 'wells', W,'bc',bc);
+
+
+
+%%
+% Plot the pressure and producer inflow profile
+% make caresian grid
+X=reshape(G.cells.centroids(:,1),G.cartDims);
+Y=reshape(G.cells.centroids(:,2),G.cartDims);
+clf
+subplot(2,3,1)
+   plotCellData(G, resSol1.pressure(1:G.cells.num) ./ barsa());
+   title('Pressure: direct TPFA')
+   view(3), camproj perspective, axis tight off, camlight headlight
+   colorbar; 
+subplot(2,3,4)
+cellflux1 = reshape(faceFlux2cellFlux(G,resSol1.flux),4,G.cells.num)';
+mesh(X,Y,reshape(resSol1.pressure(1:G.cells.num) ./ barsa(),G.cartDims));
+subplot(2,3,2)
+   plotCellData(G, resSol2.pressure(1:G.cells.num) ./ barsa());
+   title('Pressure: mimetic')
+   view(3), camproj perspective, axis tight off, camlight headlight
+   colorbar; 
+subplot(2,3,5)
+mesh(X,Y,reshape(resSol2.pressure(1:G.cells.num) ./ barsa(),G.cartDims));
+cellflux2 = reshape(faceFlux2cellFlux(G,resSol2.flux),4,G.cells.num)';
+
+subplot(2,3,3)
+   plotCellData(G, resSol3.pressure(1:G.cells.num) ./ barsa());
+   title('Pressure: mpfa')
+   view(3), camproj perspective, axis tight off, camlight headlight
+   colorbar;
+subplot(2,3,6)
+cellflux3 = reshape(faceFlux2cellFlux(G,resSol3.flux),4,G.cells.num)';
+mesh(X,Y,reshape(resSol3.pressure(1:G.cells.num) ./ barsa(),G.cartDims));
+ %%
+ % display the flux in the well for tpfa, mimetic and mpfa
+    disp(['Flux tpfa ',num2str(resSol1.wellSol(1).flux .* day())]);
+    disp(['Flux mimetic ',num2str(resSol2.wellSol(1).flux .* day())]);
+    disp(['Flux mpfa ',num2str(resSol3.wellSol(1).flux .* day())]);
+ 
+%%
+mrstModule clear
+mrstModule('add', MODS{:})
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+
+##### SOURCE END #####
+--></body></html>

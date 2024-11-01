@@ -1,0 +1,235 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Pressure Solver: Simple Corner-Point Grid with Linear Pressure Drop</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleCornerPointExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Pressure Solver: Simple Corner-Point Grid with Linear Pressure Drop</h1><!--introduction--><p>Herein we will solve the single-phase pressure equation</p><p><img src="simpleCornerPointExample_eq25293.png" alt="$$\nabla\cdot v = q, \qquad v=\textbf{--}\frac{K}{\mu}\nabla p,$$"></p><p>for a simple corner-point grid model with isotropic, lognormal permeability.</p><p>The purpose of this example is to demonstrate the mimetic pressure solver applied to a case with corner-point grids given as from an input stream in the industry-standard Eclipse&#8482; format.</p><p>
+More details of how to read, process, and manipulate corner-point data
+are given in a <a
+href="../../grids/html/cornerPointModelExample.html">separate
+example</a>.
+</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Generate the corner-point grid</a></li><li><a href="#4">Compute geometry information</a></li><li><a href="#5">Make rock and fluid data</a></li><li><a href="#7">Add boundary conditions</a></li><li><a href="#9">Assemble and solve system</a></li></ul></div><h2>Generate the corner-point grid<a name="1"></a></h2><p>The corner-point grid is generated using a standard MATLAB&reg; meshgrid which is then transformed to make sloping pillars and wavy layers. The corner-point grid is represented as a GRDECL structure, which is the same structure as is returned from readGRDECL.  If an extra parameter is passed to the simpleGrdecl function, it adds a fault to the model. This behavior is used in one of the <a href="simpleCornerPointExampleMS.html">multiscale examples</a>.</p><pre class="codeinput">nc = [20, 20, 5];
+grdecl = simpleGrdecl(nc);        <span class="comment">% No fault in model</span>
+</pre><p>Then we process the GRDECL structure and build up an unstructured grid.</p><pre class="codeinput">G = processGRDECL(grdecl); clear <span class="string">grdecl</span>
+</pre><p>After the grid structure is generated, we plot the geometry.</p><pre class="codeinput">clf, plotGrid(G);
+title(<span class="string">'Corner-point grid'</span>)
+view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span>, camlight <span class="string">headlight</span>
+</pre><img vspace="5" hspace="5" src="simpleCornerPointExample_01.png" alt=""> <h2>Compute geometry information<a name="4"></a></h2><p>Having set up the basic structure, we continue to compute centroids and volumes of the cells and centroids, normals, and areas for the faces.</p><pre class="codeinput">G = computeGeometry(G, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Computing normals, areas, and centroids...	Elapsed time is 0.005153 seconds.
+Computing cell volumes and centroids...		Elapsed time is 0.161284 seconds.
+</pre><h2>Make rock and fluid data<a name="5"></a></h2><p>We generate a lognormal and layered permeability and specify that we are working with a single-phase fluid; type "help initSingleFluid" to see default values for density and viscosity. Our flow solver is constructed for a general incompressible flow and thus requires the evaluation of a total mobility function, which in our case equals one in the whole domain.</p><pre class="codeinput">rock.perm = convertFrom(logNormLayers(nc, [100, 400, 50]), milli*darcy());
+fluid     = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+</pre><p>Plot the logarithm of the layered permeability.</p><pre class="codeinput">cla,
+plotCellData(G, log10(rock.perm(:)));
+title(<span class="string">'Log_{10} of permeability'</span>)
+camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+</pre><img vspace="5" hspace="5" src="simpleCornerPointExample_02.png" alt=""> <h2>Add boundary conditions<a name="7"></a></h2><p>Pressure is set of one bar on the west-side boundary and zero on the east-side boundary.  No-flow conditions are imposed automatically at all other (outer) boundaries.</p><pre class="codeinput">westFaces = find(G.faces.centroids(:,1) == 0);
+bc = addBC([], westFaces, <span class="string">'pressure'</span>,        <span class="keyword">...</span>
+           repmat(1*barsa(), [numel(westFaces), 1]));
+
+xMax = max(G.faces.centroids(:,1));
+eastFaces = find(G.faces.centroids(:,1) == xMax);
+bc = addBC(bc, eastFaces, <span class="string">'pressure'</span>,        <span class="keyword">...</span>
+           repmat(0, [numel(eastFaces), 1]));
+</pre><p>Then we plot the grid, coloring the faces on which we have imposed boundary conditions.</p><pre class="codeinput">cla,
+plotGrid(G, <span class="string">'FaceColor'</span>, <span class="string">'none'</span>);
+plotFaces(G, westFaces, <span class="string">'r'</span>);
+plotFaces(G, eastFaces, <span class="string">'b'</span>);
+title(<span class="string">'Boundary conditions'</span>)
+camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+</pre><img vspace="5" hspace="5" src="simpleCornerPointExample_03.png" alt=""> <h2>Assemble and solve system<a name="9"></a></h2><p>Finally, we assemble the mimetic system in hybrid form and solve the corresponding linear equations.</p><pre class="codeinput">rSol = initResSol(G, 0);
+S    = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, true);
+rSol = solveIncompFlow(rSol, G, S, fluid, <span class="string">'MatrixOutput'</span>, true, <span class="string">'bc'</span>, bc);
+</pre><pre class="codeoutput">Using inner product: 'ip_simple'.
+Computing cell inner products ...		Elapsed time is 0.199021 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.001772 seconds.
+</pre><p>We plot the results: cell pressure is converted to unit 'bar' and fluxes to unit m^3/day when plotting results.</p><pre class="codeinput">subplot(<span class="string">'Position'</span>,[0.01 0.25 0.48 0.5]),
+   plotCellData(G, convertTo(rSol.pressure(1:G.cells.num), barsa()));
+   title(<span class="string">'Pressure [bar]'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+
+subplot(<span class="string">'Position'</span>,[0.51 0.25 0.48 0.5]),
+   cellNo  = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+   plotCellData(G, sqrt(accumarray(cellNo, <span class="keyword">...</span>
+      abs(convertTo(faceFlux2cellFlux(G, rSol.flux), meter^3/day)))));
+   title(<span class="string">'Sqrt - Flux intensity [m^3/day]'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">off</span>, camlight <span class="string">headlight</span>
+</pre><img vspace="5" hspace="5" src="simpleCornerPointExample_04.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Pressure Solver: Simple Corner-Point Grid with Linear Pressure Drop
+% Herein we will solve the single-phase pressure equation
+%
+% $$\nabla\cdot v = q, \qquad v=\textbf{REPLACE_WITH_DASH_DASH}\frac{K}{\mu}\nabla p,$$
+%
+% for a simple corner-point grid model with isotropic, lognormal
+% permeability.
+%
+% The purpose of this example is to demonstrate the mimetic pressure solver
+% applied to a case with corner-point grids given as from an input stream
+% in the industry-standard Eclipse(TM) format.
+%
+% <html>
+% More details of how to read, process, and manipulate corner-point data
+% are given in a <a
+% href="../../grids/html/cornerPointModelExample.html">separate
+% example</a>.
+% </html>
+
+
+%% Generate the corner-point grid
+% The corner-point grid is generated using a standard MATLAB(R) meshgrid
+% which is then transformed to make sloping pillars and wavy layers. The
+% corner-point grid is represented as a GRDECL structure, which is the same
+% structure as is returned from readGRDECL.  If an extra parameter is
+% passed to the simpleGrdecl function, it adds a fault to the model. This
+% behavior is used in one of the <simpleCornerPointExampleMS.html
+% multiscale examples>.
+nc = [20, 20, 5];
+grdecl = simpleGrdecl(nc);        % No fault in model
+
+%%
+% Then we process the GRDECL structure and build up an unstructured grid.
+G = processGRDECL(grdecl); clear grdecl
+
+%%
+% After the grid structure is generated, we plot the geometry.
+clf, plotGrid(G);
+title('Corner-point grid')
+view(3), camproj perspective, axis tight, camlight headlight
+
+%% Compute geometry information
+% Having set up the basic structure, we continue to compute centroids and
+% volumes of the cells and centroids, normals, and areas for the faces.
+G = computeGeometry(G, 'Verbose', true);
+
+
+%% Make rock and fluid data
+% We generate a lognormal and layered permeability and specify that we are
+% working with a single-phase fluid; type "help initSingleFluid" to see
+% default values for density and viscosity. Our flow solver is constructed
+% for a general incompressible flow and thus requires the evaluation of a
+% total mobility function, which in our case equals one in the whole
+% domain.
+rock.perm = convertFrom(logNormLayers(nc, [100, 400, 50]), milli*darcy());
+fluid     = initSingleFluid('mu' ,    1*centi*poise     , ...
+                            'rho', 1014*kilogram/meter^3);
+
+%%
+% Plot the logarithm of the layered permeability.
+cla,
+plotCellData(G, log10(rock.perm(:)));
+title('Log_{10} of permeability')
+camproj perspective, axis tight off, camlight headlight
+
+%% Add boundary conditions
+% Pressure is set of one bar on the west-side boundary and zero on the
+% east-side boundary.  No-flow conditions are imposed automatically at all
+% other (outer) boundaries.
+westFaces = find(G.faces.centroids(:,1) == 0);
+bc = addBC([], westFaces, 'pressure',        ...
+           repmat(1*barsa(), [numel(westFaces), 1]));
+
+xMax = max(G.faces.centroids(:,1));
+eastFaces = find(G.faces.centroids(:,1) == xMax);
+bc = addBC(bc, eastFaces, 'pressure',        ...
+           repmat(0, [numel(eastFaces), 1]));
+
+%%
+% Then we plot the grid, coloring the faces on which we have imposed
+% boundary conditions.
+cla,
+plotGrid(G, 'FaceColor', 'none');
+plotFaces(G, westFaces, 'r');
+plotFaces(G, eastFaces, 'b');
+title('Boundary conditions')
+camproj perspective, axis tight off, camlight headlight
+
+
+%%  Assemble and solve system
+% Finally, we assemble the mimetic system in hybrid form and solve the
+% corresponding linear equations.
+rSol = initResSol(G, 0);
+S    = computeMimeticIP(G, rock, 'Verbose', true);
+rSol = solveIncompFlow(rSol, G, S, fluid, 'MatrixOutput', true, 'bc', bc);
+
+%%
+% We plot the results: cell pressure is converted to unit 'bar' and fluxes
+% to unit m^3/day when plotting results.
+subplot('Position',[0.01 0.25 0.48 0.5]),
+   plotCellData(G, convertTo(rSol.pressure(1:G.cells.num), barsa()));
+   title('Pressure [bar]')
+   view(3), camproj perspective, axis tight off, camlight headlight
+
+subplot('Position',[0.51 0.25 0.48 0.5]),
+   cellNo  = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+   plotCellData(G, sqrt(accumarray(cellNo, ...
+      abs(convertTo(faceFlux2cellFlux(G, rSol.flux), meter^3/day)))));
+   title('Sqrt - Flux intensity [m^3/day]')
+   view(3), camproj perspective, axis tight off, camlight headlight
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>

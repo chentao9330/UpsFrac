@@ -1,0 +1,240 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>example2</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="example2.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h2>Contents</h2><div><ul><li><a href="#1">Example 2: Constrained coarsening</a></li><li><a href="#2">Model with two facies</a></li><li><a href="#5">Model with four facies</a></li></ul></div><h2>Example 2: Constrained coarsening<a name="1"></a></h2><p>In this example we discuss how to use additional geological information to perform constrained coarsening.</p><p><b>References:</b></p><div><ol><li>V. L. Hauge, K.-A. Lie, J. R. Natvig,   Grid coarsening based on amalgamation for multi-fidelity transport   solvers, September 2010,   <a href="http://www.sintef.no/Projectweb/GeoScale/Publications/">http://www.sintef.no/Projectweb/GeoScale/Publications/</a></li></ol></div><pre class="codeinput"><span class="keyword">try</span>
+   require <span class="string">coarsegrid</span>
+<span class="keyword">catch</span> me
+   mrstModule <span class="string">add</span> <span class="string">coarsegrid</span>;
+<span class="keyword">end</span>
+</pre><h2>Model with two facies<a name="2"></a></h2><p>As a first case, we consider 40x40 fine grid for which the image 'facies1.png' represents some geological object that is defined on a background. In our gridding, we will make sure that the object is represented also in the coarse model. To this end, we will partition the grid into a uniform 5x5 coarse grid and in addition preserve the edges of the object.</p><pre class="codeinput">exdir = fileparts(mfilename(<span class="string">'fullpath'</span>));
+<span class="keyword">if</span> isempty(exdir), exdir = pwd; <span class="keyword">end</span>
+imload = @(fn) <span class="keyword">...</span>
+   flipud(double(sum(imread(fullfile(exdir, <span class="string">'data'</span>, fn)), 3))) .';
+
+f  = imload(<span class="string">'facies1.png'</span>);
+G  = computeGeometry(cartGrid(size(f)) );
+
+ps      = compressPartition(f(:) + 1); clear <span class="string">f</span>;
+pu      = partitionUI(G, [4 4]);
+[b,i,p] = unique([ps, pu], <span class="string">'rows'</span>);
+p       = processPartition(G, p);
+
+clf,
+plotCellData(G, ps);
+outlineCoarseGrid(G, p, <span class="string">'w'</span>);
+</pre><img vspace="5" hspace="5" src="example2_01.png" alt=""> <p>Let us now consider the same model, but with some 'noise' added outside the main object, which may or may not lead to confined blocks, i.e., blocks that are completely contained within another block. The confined blocks are marked in white color in the plot below.</p><pre class="codeinput">f       = imload(<span class="string">'facies2.png'</span>);
+ps      = compressPartition(f(:) + 1); clear <span class="string">f</span>;
+[b,i,p] = unique([ps, pu], <span class="string">'rows'</span>); <span class="comment">%#ok&lt;*ASGLU&gt;</span>
+p       = processPartition(G, p);
+blks    = findConfinedBlocks(G, p);
+
+clf,
+plotCellData(G, ps);
+outlineCoarseGrid(G, p, <span class="string">'w'</span>);
+<span class="keyword">for</span> i=1:numel(blks),
+   plotGrid(G,find(p==blks(i)),<span class="string">'FaceColor'</span>,<span class="string">'w'</span>,<span class="string">'edgecolor'</span>,<span class="string">'none'</span>)
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="example2_02.png" alt=""> <p>Such blocks should be detected and removed. If a block only has a single neighbour, it will have only one coarse face. This means that the block will effectively represent an obstacle to flow inside the domain in an incompressible flow simulation using net fluxes on the coarse grid.</p><pre class="codeinput">[blks, p] = findConfinedBlocks(G, p);
+
+clf,
+plotCellData(G, ps);
+outlineCoarseGrid(G, p, <span class="string">'w'</span>);
+</pre><img vspace="5" hspace="5" src="example2_03.png" alt=""> <h2>Model with four facies<a name="5"></a></h2><p>As our next case, we consider a reservoir in which we have four different facies that are read from a png-image. For each facies, we generate a different lognormal permeability distribution.</p><pre class="codeinput">f       = imload(<span class="string">'facies3.png'</span>);
+G       = computeGeometry(cartGrid(size(f), [500 500]));
+k       = logNormLayers([size(f) 4],[800 50 200 1]);
+[b,i,j] = unique(f); num=1:length(b);
+facies  = num(j).';
+K       = k( (1:numel(facies))' + (facies-1)*numel(facies));
+rock.perm = K(:);
+rock.poro = 0.2*ones(size(K));
+clear <span class="string">f</span> <span class="string">k</span>;
+
+clf,
+subplot(2,2,1)
+plotCellData(G, facies), axis <span class="string">equal</span> <span class="string">tight</span>, title(<span class="string">'Facies'</span>)
+subplot(2,2,2)
+plotCellData(G,log10(rock.perm)), axis <span class="string">equal</span> <span class="string">tight</span>, title(<span class="string">'log10(K)'</span>)
+</pre><img vspace="5" hspace="5" src="example2_04.png" alt=""> <p>The facies distribution contain some speckles which one should be careful to get rid of as shown in the lower-right plot</p><pre class="codeinput">pu      = partitionUI(G, [8 8]);
+[b,i,p] = unique([pu, facies], <span class="string">'rows'</span>);
+p       = processPartition(G, p);
+[b,  p] = findConfinedBlocks(G, p);
+
+subplot(2,2,3), cla
+plotCellData(G,facies), axis <span class="string">equal</span> <span class="string">tight</span>, title(<span class="string">'Partition'</span>);
+h=outlineCoarseGrid(G,p,<span class="string">'w'</span>); set(h,<span class="string">'LineWidth'</span>,1);
+
+subplot(2,2,4), cla
+plotCellData(G,facies), axis <span class="string">equal</span> <span class="string">tight</span>, title(<span class="string">'Details of partition'</span>);
+outlineCoarseGrid(G,p,<span class="string">'w'</span>); axis([130 300 320 490])
+</pre><img vspace="5" hspace="5" src="example2_05.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Example 2: Constrained coarsening
+% In this example we discuss how to use additional geological information
+% to perform constrained coarsening.
+%
+% *References:*
+%
+% # V. L. Hauge, K.-A. Lie, J. R. Natvig, 
+%   Grid coarsening based on amalgamation for multi-fidelity transport
+%   solvers, September 2010,
+%   http://www.sintef.no/Projectweb/GeoScale/Publications/
+
+try
+   require coarsegrid
+catch me
+   mrstModule add coarsegrid;
+end
+%% Model with two facies
+% As a first case, we consider 40x40 fine grid for which the image
+% 'facies1.png' represents some geological object that is defined on a
+% background. In our gridding, we will make sure that the object is
+% represented also in the coarse model. To this end, we will partition the
+% grid into a uniform 5x5 coarse grid and in addition preserve the edges
+% of the object.
+exdir = fileparts(mfilename('fullpath'));
+if isempty(exdir), exdir = pwd; end
+imload = @(fn) ...
+   flipud(double(sum(imread(fullfile(exdir, 'data', fn)), 3))) .';
+
+f  = imload('facies1.png');
+G  = computeGeometry(cartGrid(size(f)) );
+
+ps      = compressPartition(f(:) + 1); clear f;
+pu      = partitionUI(G, [4 4]);
+[b,i,p] = unique([ps, pu], 'rows');
+p       = processPartition(G, p);
+
+clf,
+plotCellData(G, ps);
+outlineCoarseGrid(G, p, 'w');
+
+%%
+% Let us now consider the same model, but with some 'noise' added outside
+% the main object, which may or may not lead to confined blocks, i.e.,
+% blocks that are completely contained within another block. The confined
+% blocks are marked in white color in the plot below.
+f       = imload('facies2.png');
+ps      = compressPartition(f(:) + 1); clear f;
+[b,i,p] = unique([ps, pu], 'rows'); %#ok<*ASGLU>
+p       = processPartition(G, p);
+blks    = findConfinedBlocks(G, p);
+
+clf,
+plotCellData(G, ps);
+outlineCoarseGrid(G, p, 'w');
+for i=1:numel(blks), 
+   plotGrid(G,find(p==blks(i)),'FaceColor','w','edgecolor','none')
+end
+
+%%
+% Such blocks should be detected and removed. If a block only has a single
+% neighbour, it will have only one coarse face. This means that the block
+% will effectively represent an obstacle to flow inside the domain in an
+% incompressible flow simulation using net fluxes on the coarse grid.
+[blks, p] = findConfinedBlocks(G, p);
+
+clf,
+plotCellData(G, ps);
+outlineCoarseGrid(G, p, 'w');
+
+%% Model with four facies
+% As our next case, we consider a reservoir in which we have four
+% different facies that are read from a png-image. For each facies, we
+% generate a different lognormal permeability distribution.
+f       = imload('facies3.png');
+G       = computeGeometry(cartGrid(size(f), [500 500]));
+k       = logNormLayers([size(f) 4],[800 50 200 1]);
+[b,i,j] = unique(f); num=1:length(b);
+facies  = num(j).';
+K       = k( (1:numel(facies))' + (facies-1)*numel(facies));
+rock.perm = K(:);
+rock.poro = 0.2*ones(size(K));
+clear f k;
+
+clf, 
+subplot(2,2,1)
+plotCellData(G, facies), axis equal tight, title('Facies')
+subplot(2,2,2)
+plotCellData(G,log10(rock.perm)), axis equal tight, title('log10(K)')
+
+
+%%
+% The facies distribution contain some speckles which one should be careful
+% to get rid of as shown in the lower-right plot
+pu      = partitionUI(G, [8 8]);
+[b,i,p] = unique([pu, facies], 'rows');
+p       = processPartition(G, p);
+[b,  p] = findConfinedBlocks(G, p);
+
+subplot(2,2,3), cla
+plotCellData(G,facies), axis equal tight, title('Partition');
+h=outlineCoarseGrid(G,p,'w'); set(h,'LineWidth',1);
+
+subplot(2,2,4), cla
+plotCellData(G,facies), axis equal tight, title('Details of partition');
+outlineCoarseGrid(G,p,'w'); axis([130 300 320 490])
+
+##### SOURCE END #####
+--></body></html>

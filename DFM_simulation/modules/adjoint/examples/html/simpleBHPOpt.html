@@ -1,0 +1,369 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>simpleBHPOpt</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleBHPOpt.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><pre class="codeinput"><span class="comment">% simple adjoint test using BHP-control</span>
+
+<span class="comment">%{
+</span><span class="comment">#COPYRIGHT#
+</span><span class="comment">%}
+</span>
+
+
+
+<span class="comment">% whether or not to show output</span>
+verbose = false;
+verboseLevel = 0;
+
+<span class="comment">% Define model ------------------------------------------------------------</span>
+nx = 21; ny = 21; nz = 1;
+G = cartGrid([nx ny nz], [5*nx 5*ny 1*nz]);
+G = computeGeometry(G);
+
+c = G.cells.centroids;
+rock.perm  = max(10*sin(c(:,2)/25+.5*cos(c(:,1)/25))-9, .01)*1000*milli*darcy;
+rock.poro  = repmat(0.3, [G.cells.num, 1]);
+
+fluid  = initCoreyFluid(<span class="string">'mu'</span> , [1, 5] .* centi*poise, <span class="keyword">...</span>
+                        <span class="string">'rho'</span>, [1014, 859].*kilogram/meter^3, <span class="keyword">...</span>
+                        <span class="string">'n'</span>  , [2, 2], <span class="string">'sr'</span>, [0, 0], <span class="string">'kwm'</span>, [1, 1]);
+fluid  = adjointFluidFields(fluid);
+
+
+<span class="comment">% Wells and initial rates -------------------------------------------------</span>
+radius = .1;
+totVol = sum(poreVolume(G, rock));
+totTime = 500*day;
+W = [];
+<span class="comment">% Injectors along left side:</span>
+nInj = 3; <span class="comment">% &gt; 1</span>
+pos  = (1 : (ny-1)/(nInj-1) : ny)';
+posInj  = round(pos);
+<span class="keyword">for</span> k = 1:nInj
+    nm = [<span class="string">'inj'</span>, num2str(k)];
+    W = addWell(W, G, rock, 1+(posInj(k)-1)*nx, <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>, 500*barsa, <span class="keyword">...</span>
+                <span class="string">'Radius'</span>, radius, <span class="string">'Name'</span>, nm, <span class="string">'Comp_i'</span>, [1, 0], <span class="string">'Sign'</span>, 1);
+<span class="keyword">end</span>
+<span class="comment">% Producers along right side:</span>
+nProd = 5; <span class="comment">% &gt;1</span>
+pos  = (1 : (ny-1)/(nProd-1) : ny)';
+posProd  = round(pos);
+<span class="keyword">for</span> k = 1:nProd
+    nm = [<span class="string">'prod'</span>, num2str(k)];
+    W = addWell(W, G, rock, nx+(posProd(k)-1)*nx, <span class="string">'Type'</span>, <span class="string">'bhp'</span> , <span class="string">'Val'</span>, 150*barsa, <span class="keyword">...</span>
+                <span class="string">'Radius'</span>, radius, <span class="string">'Name'</span>, nm, <span class="string">'Comp_i'</span>, [1, 0], <span class="string">'Sign'</span>, -1);
+<span class="keyword">end</span>
+
+<span class="comment">% System components -------------------------------------------------------</span>
+S = computeMimeticIP(G, rock, <span class="string">'Type'</span>, <span class="string">'comp_hybrid'</span>, <span class="string">'Verbose'</span>, verbose, <span class="keyword">...</span>
+                     <span class="string">'InnerProduct'</span>, <span class="string">'ip_tpf'</span>);
+W = assembleWellSystem(G, W, <span class="string">'Type'</span>, <span class="string">'comp_hybrid'</span>);
+
+<span class="comment">% Initialize --------------------------------------------------------------</span>
+state = initResSol(G, 0.0);
+state.wellSol = initWellSol(W, 0);
+
+<span class="comment">% Objective function ------------------------------------------------------</span>
+objectiveFunction = str2func(<span class="string">'simpleNPV'</span>);
+
+<span class="comment">% Initialize schedule and controls ----------------------------------------</span>
+numSteps = 10;
+schedule = initSchedule(W, <span class="string">'NumSteps'</span>, numSteps, <span class="string">'TotalTime'</span>, <span class="keyword">...</span>
+                        totTime, <span class="string">'Verbose'</span>, verbose);
+
+<span class="comment">% box constraints for each well [min rate, max rate]</span>
+box = [repmat([300*barsa 700*barsa], nInj, 1); repmat([100*barsa 200*barsa], nProd, 1)];
+controls = initControls(schedule, <span class="string">'ControllableWells'</span>, (1:numel(W)), <span class="keyword">...</span>
+                                  <span class="string">'MinMax'</span>, box, <span class="keyword">...</span>
+                                  <span class="string">'Verbose'</span>, verbose, <span class="keyword">...</span>
+                                  <span class="string">'NumControlSteps'</span>, numSteps);
+
+<span class="comment">% Run optimization --------------------------------------------------------</span>
+[simRes, schedule, controls, out] = optimizeObjective(G, S, W, rock, <span class="keyword">...</span>
+                                        fluid, state, schedule, <span class="keyword">...</span>
+                                        controls, objectiveFunction, <span class="keyword">...</span>
+                                        <span class="string">'gradTol'</span>,       1e-3, <span class="keyword">...</span>
+                                        <span class="string">'objChangeTol'</span>,  5e-4, <span class="keyword">...</span>
+                                        <span class="string">'VerboseLevel'</span>, verboseLevel);
+</pre><pre class="codeoutput">
+********** STARTING ITERATION   1 ****************
+Current stepsize: -1.00000
+Forward solve   1:  0.304 sec. 
+Initial function value: -383302.272
+
+Adjoint solve   1:  0.157 sec. 
+
+********* Starting line search ***********
+
+Estimated step size :       1.5
+Forward simulation: 0.31 sec. Objective value = 4.7127491e+05
+Forward simulation: 0.32 sec. Objective value = 2.1646308e+05
+Increasing step size :         3
+Forward simulation: 0.33 sec. Objective value = 7.6402901e+05
+Increasing step size :         6
+Forward simulation: 0.31 sec. Objective value = 7.8596092e+05
+Increasing step size :        12
+Forward simulation: 0.32 sec. Objective value = 7.8061323e+05
+Forward simulation: 0.32 sec. Objective value = 7.8706769e+05
+
+********** REPORT ITERATION   1 **********************
+*
+*  Obtained value               : 7.871e+05
+*  Change  (current/tol)        : 5.130e-01 / 5.000e-04
+*  Gradient norm (current/tol)  : 2.363e+00 / 1.000e-03
+*
+********************************************************
+
+********** STARTING ITERATION   2 ****************
+Current stepsize: 10.21320
+Adjoint solve   2:  0.159 sec. 
+
+********* Starting line search ***********
+
+Forward simulation: 0.32 sec. Objective value = 8.0038626e+05
+Forward simulation: 0.31 sec. Objective value = 7.9531578e+05
+Increasing step size :   20.4264
+Forward simulation: 0.32 sec. Objective value = 8.0620421e+05
+Increasing step size :   40.8528
+Forward simulation: 0.31 sec. Objective value = 8.0474144e+05
+Forward simulation: 0.31 sec. Objective value = 8.0713438e+05
+
+********** REPORT ITERATION   2 **********************
+*
+*  Obtained value               : 8.071e+05
+*  Change  (current/tol)        : 2.486e-02 / 5.000e-04
+*  Gradient norm (current/tol)  : 1.021e-01 / 1.000e-03
+*
+********************************************************
+
+********** STARTING ITERATION   3 ****************
+Current stepsize: 34.71454
+Adjoint solve   3:  0.148 sec. 
+
+********* Starting line search ***********
+
+Forward simulation: 0.32 sec. Objective value = 8.1119697e+05
+Forward simulation: 0.32 sec. Objective value = 8.0924512e+05
+Increasing step size :   69.4291
+Forward simulation: 0.31 sec. Objective value = 8.1241771e+05
+Increasing step size :   138.858
+Forward simulation: 0.33 sec. Objective value = 8.1336171e+05
+Increasing step size :   277.716
+Forward simulation: 0.32 sec. Objective value = 8.1189442e+05
+Forward simulation: 0.32 sec. Objective value = 8.1327754e+05
+
+********** REPORT ITERATION   3 **********************
+*
+*  Obtained value               : 8.134e+05
+*  Change  (current/tol)        : 7.656e-03 / 5.000e-04
+*  Gradient norm (current/tol)  : 2.027e-02 / 1.000e-03
+*
+********************************************************
+
+********** STARTING ITERATION   4 ****************
+Current stepsize: 166.62977
+Adjoint solve   4:  0.152 sec. 
+
+********* Starting line search ***********
+
+Forward simulation: 0.32 sec. Objective value = 8.0853268e+05
+Forward simulation: 0.32 sec. Objective value = 8.1390555e+05
+Forward simulation: 0.33 sec. Objective value = 8.1462069e+05
+
+********** REPORT ITERATION   4 **********************
+*
+*  Obtained value               : 8.146e+05
+*  Change  (current/tol)        : 1.545e-03 / 5.000e-04
+*  Gradient norm (current/tol)  : 1.917e-02 / 1.000e-03
+*
+********************************************************
+
+********** STARTING ITERATION   5 ****************
+Current stepsize: 59.17847
+Adjoint solve   5:  0.151 sec. 
+
+********* Starting line search ***********
+
+Forward simulation: 0.32 sec. Objective value = 8.1496669e+05
+Forward simulation: 0.33 sec. Objective value = 8.1481229e+05
+Increasing step size :   118.357
+Forward simulation: 0.32 sec. Objective value = 8.1509247e+05
+Increasing step size :   236.714
+Forward simulation: 0.32 sec. Objective value = 8.1446046e+05
+Forward simulation: 0.32 sec. Objective value = 8.1509633e+05
+
+********** REPORT ITERATION   5 **********************
+*
+*  Obtained value               : 8.151e+05
+*  Change  (current/tol)        : 5.835e-04 / 5.000e-04
+*  Gradient norm (current/tol)  : 3.532e-03 / 1.000e-03
+*
+********************************************************
+
+********** STARTING ITERATION   6 ****************
+Current stepsize: 136.84993
+Adjoint solve   6:  0.161 sec. 
+
+********* Starting line search ***********
+
+Forward simulation: 0.32 sec. Objective value = 8.1500210e+05
+Forward simulation: 0.32 sec. Objective value = 8.1522910e+05
+Forward simulation: 0.32 sec. Objective value = 8.1523302e+05
+
+********** REPORT ITERATION   6 **********************
+*
+*  Obtained value               : 8.152e+05
+*  Change  (current/tol)        : 1.677e-04 / 5.000e-04
+*  Gradient norm (current/tol)  : 5.041e-03 / 1.000e-03
+*
+********************************************************
+</pre><img vspace="5" hspace="5" src="simpleBHPOpt_01.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+% simple adjoint test using BHP-control
+
+%{
+#COPYRIGHT#
+%}
+
+% $Date: 2012-10-01 10:02:27 +0200 (Mon, 01 Oct 2012) $
+% $Revision: 9877 $
+
+% whether or not to show output
+verbose = false;
+verboseLevel = 0;
+
+% Define model REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH
+nx = 21; ny = 21; nz = 1;
+G = cartGrid([nx ny nz], [5*nx 5*ny 1*nz]);
+G = computeGeometry(G);
+
+c = G.cells.centroids;
+rock.perm  = max(10*sin(c(:,2)/25+.5*cos(c(:,1)/25))-9, .01)*1000*milli*darcy;
+rock.poro  = repmat(0.3, [G.cells.num, 1]);
+
+fluid  = initCoreyFluid('mu' , [1, 5] .* centi*poise, ...
+                        'rho', [1014, 859].*kilogram/meter^3, ...
+                        'n'  , [2, 2], 'sr', [0, 0], 'kwm', [1, 1]);
+fluid  = adjointFluidFields(fluid);
+
+
+% Wells and initial rates REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH-
+radius = .1;
+totVol = sum(poreVolume(G, rock));
+totTime = 500*day;
+W = [];
+% Injectors along left side:
+nInj = 3; % > 1
+pos  = (1 : (ny-1)/(nInj-1) : ny)';
+posInj  = round(pos);
+for k = 1:nInj
+    nm = ['inj', num2str(k)];
+    W = addWell(W, G, rock, 1+(posInj(k)-1)*nx, 'Type', 'bhp' , 'Val', 500*barsa, ...
+                'Radius', radius, 'Name', nm, 'Comp_i', [1, 0], 'Sign', 1);
+end
+% Producers along right side:
+nProd = 5; % >1
+pos  = (1 : (ny-1)/(nProd-1) : ny)';
+posProd  = round(pos);
+for k = 1:nProd
+    nm = ['prod', num2str(k)];
+    W = addWell(W, G, rock, nx+(posProd(k)-1)*nx, 'Type', 'bhp' , 'Val', 150*barsa, ...
+                'Radius', radius, 'Name', nm, 'Comp_i', [1, 0], 'Sign', -1);
+end
+
+% System components REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH-
+S = computeMimeticIP(G, rock, 'Type', 'comp_hybrid', 'Verbose', verbose, ...
+                     'InnerProduct', 'ip_tpf');
+W = assembleWellSystem(G, W, 'Type', 'comp_hybrid');
+
+% Initialize REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH
+state = initResSol(G, 0.0);
+state.wellSol = initWellSol(W, 0);
+
+% Objective function REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH
+objectiveFunction = str2func('simpleNPV');
+
+% Initialize schedule and controls REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH
+numSteps = 10;
+schedule = initSchedule(W, 'NumSteps', numSteps, 'TotalTime', ...
+                        totTime, 'Verbose', verbose);
+
+% box constraints for each well [min rate, max rate]       
+box = [repmat([300*barsa 700*barsa], nInj, 1); repmat([100*barsa 200*barsa], nProd, 1)];
+controls = initControls(schedule, 'ControllableWells', (1:numel(W)), ...
+                                  'MinMax', box, ...
+                                  'Verbose', verbose, ...
+                                  'NumControlSteps', numSteps);                               
+
+% Run optimization REPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASHREPLACE_WITH_DASH_DASH                              
+[simRes, schedule, controls, out] = optimizeObjective(G, S, W, rock, ...
+                                        fluid, state, schedule, ...
+                                        controls, objectiveFunction, ...
+                                        'gradTol',       1e-3, ...
+                                        'objChangeTol',  5e-4, ...
+                                        'VerboseLevel', verboseLevel);
+                                    
+
+##### SOURCE END #####
+--></body></html>

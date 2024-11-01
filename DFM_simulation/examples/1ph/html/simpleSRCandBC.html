@@ -1,0 +1,219 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>How to Specify Sources and Boundary Conditions</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simpleSRCandBC.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>How to Specify Sources and Boundary Conditions</h1><!--introduction--><p>This example shows how to set up a combination of source and boundary conditions and is a continuation of two previous examples, <a href="simpleBC.html">the basic flow-solver tutorial</a> and the <a href="gravityColumn.html">gravity column example</a>.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Define grid, rock and fluid data</a></li><li><a href="#2">Add sources and boundary conditions</a></li><li><a href="#5">Construct and solve the linear system</a></li><li><a href="#7">Plot output</a></li></ul></div><h2>Define grid, rock and fluid data<a name="1"></a></h2><p>Construct a Cartesian grid of size nx-by-ny-by-nz cells, where each cell has dimension 1-by-1-by-1 m. Set an isotropic and homogeneous permeability of 100 mD, a fluid viscosity of 1 cP and a fluid density of 1000 kg/m^3.</p><pre class="codeinput">nx = 20; ny = 20; nz = 10;
+G = cartGrid([nx, ny, nz]);
+G = computeGeometry(G);
+rock.perm = repmat(100 * milli*darcy, [G.cells.num, 1]);
+fluid     = initSingleFluid(<span class="string">'mu'</span> ,    1*centi*poise     , <span class="keyword">...</span>
+                            <span class="string">'rho'</span>, 1014*kilogram/meter^3);
+gravity <span class="string">reset</span> <span class="string">on</span>
+</pre><h2>Add sources and boundary conditions<a name="2"></a></h2><p>The simplest way to model inflow or outflow from the reservoir is to use a fluid source/sink. Here we specify a source with flux rate of 1m^3/day in each grid cell.</p><pre class="codeinput">c   = (nx/2*ny+nx/2 : nx*ny : nx*ny*nz) .';
+src = addSource([], c, ones(size(c)) ./ day());
+display(src);
+</pre><pre class="codeoutput">
+src = 
+
+    cell: [10x1 double]
+    rate: [10x1 double]
+     sat: []
+
+</pre><p>Our flow solvers automatically assume no-flow conditions on all outer (and inner) boundaries; other types of boundary conditions need to be specified explicitly.  Here we impose a Dirichlet boundary condition of p=10 bar at the global left-hand side of the model. For a single-phase flow, we do not need to specify fluid saturation at the boundary and the last argument is therefor left empty.</p><pre class="codeinput">bc = pside([], G, <span class="string">'LEFT'</span>, 10*barsa());
+</pre><p>To check that boundary conditions and sources are placed at the correct location, we plot the model.</p><pre class="codeinput">subplot(2,2,1), pos = get(gca,<span class="string">'Position'</span>); clf
+   plotGrid(G,    <span class="string">'FaceColor'</span>, <span class="string">'none'</span>);
+   plotGrid(G, c, <span class="string">'FaceColor'</span>, <span class="string">'r'</span>);
+   plotFaces(G, bc.face, <span class="string">'b'</span>);
+   title(<span class="string">'Boundary conditions and source-cells'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+   h = gca;
+</pre><img vspace="5" hspace="5" src="simpleSRCandBC_01.png" alt=""> <h2>Construct and solve the linear system<a name="5"></a></h2><p>Construct mimetic pressure linear system components for the system Ax = b</p><p><img src="simpleSRCandBC_eq96586.png" alt="$$ A x = \left[\begin{array}{ccc}&#xA;                 B &amp; C &amp; D \\ C' &amp; 0 &amp; 0 \\ D' &amp; 0 &amp; 0&#xA;          \end{array}\right]&#xA;          \left[\begin{array}{c} v \\ \textbf{--}p \\ \lambda \end{array}\right]&#xA;        = [\mbox{RHS}] = b $$"></p><p>based on input grid and rock properties. For more details of the linear system, see the <a href="simpleBC.html">basic tutorial example</a>.</p><pre class="codeinput">S = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, true);
+</pre><pre class="codeoutput">Using inner product: 'ip_simple'.
+Computing cell inner products ...		Elapsed time is 0.352238 seconds.
+Assembling global inner product matrix ...	Elapsed time is 0.003974 seconds.
+</pre><p>Compute the solution for the system with sources and boundary conditions</p><pre class="codeinput">rSol = initResSol(G, 0);
+rSol = solveIncompFlow(rSol, G, S, fluid, <span class="string">'MatrixOutput'</span>, true, <span class="keyword">...</span>
+                       <span class="string">'src'</span>, src, <span class="string">'bc'</span>, bc);
+</pre><h2>Plot output<a name="7"></a></h2><p>We convert the cell pressure to unit bar and the fluxes to unit m^3/day when plotting the results. Although it is not strictly necessary here, we show how to make shorthands to simplify the plotting.</p><pre class="codeinput">cellNo    = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+plot_var  = @(x) plotCellData(G, x);
+plot_pres = @(x) plot_var(convertTo(x.pressure(1:G.cells.num), barsa()));
+plot_flux = @(x) plot_var(accumarray(cellNo, <span class="keyword">...</span>
+   abs(convertTo(faceFlux2cellFlux(G, x.flux), meter^3/day))));
+
+set(h,<span class="string">'Position'</span>,pos); <span class="comment">% move first plot to subplot(2,2,1);</span>
+
+subplot(2,2,2)
+   spy(rSol.A)
+   title(<span class="string">'System matrix'</span>)
+
+subplot(2,2,3)
+   plot_pres(rSol);
+   title(<span class="string">'Pressure [bar]'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+
+subplot(2,2,4)
+   plot_flux(rSol);
+   title(<span class="string">'Sqrt of flux intensity [m^3/day]'</span>)
+   view(3), camproj <span class="string">perspective</span>, axis <span class="string">tight</span> <span class="string">equal</span>, camlight <span class="string">headlight</span>
+</pre><img vspace="5" hspace="5" src="simpleSRCandBC_02.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% How to Specify Sources and Boundary Conditions
+% This example shows how to set up a combination of source and boundary
+% conditions and is a continuation of two previous examples, <simpleBC.html
+% the basic flow-solver tutorial> and the <gravityColumn.html gravity
+% column example>.
+
+
+%% Define grid, rock and fluid data
+% Construct a Cartesian grid of size nx-by-ny-by-nz cells, where each cell
+% has dimension 1-by-1-by-1 m. Set an isotropic and homogeneous
+% permeability of 100 mD, a fluid viscosity of 1 cP and a fluid density of
+% 1000 kg/m^3.
+nx = 20; ny = 20; nz = 10;
+G = cartGrid([nx, ny, nz]);
+G = computeGeometry(G);
+rock.perm = repmat(100 * milli*darcy, [G.cells.num, 1]);
+fluid     = initSingleFluid('mu' ,    1*centi*poise     , ...
+                            'rho', 1014*kilogram/meter^3);
+gravity reset on
+
+
+%% Add sources and boundary conditions
+% The simplest way to model inflow or outflow from the reservoir is to use
+% a fluid source/sink. Here we specify a source with flux rate of 1m^3/day
+% in each grid cell.
+c   = (nx/2*ny+nx/2 : nx*ny : nx*ny*nz) .';
+src = addSource([], c, ones(size(c)) ./ day());
+display(src);
+
+%%
+% Our flow solvers automatically assume no-flow conditions on all outer
+% (and inner) boundaries; other types of boundary conditions need to be
+% specified explicitly.  Here we impose a Dirichlet boundary condition of
+% p=10 bar at the global left-hand side of the model. For a single-phase
+% flow, we do not need to specify fluid saturation at the boundary and the
+% last argument is therefor left empty.
+bc = pside([], G, 'LEFT', 10*barsa());
+
+%%
+% To check that boundary conditions and sources are placed at the correct
+% location, we plot the model.
+subplot(2,2,1), pos = get(gca,'Position'); clf
+   plotGrid(G,    'FaceColor', 'none');
+   plotGrid(G, c, 'FaceColor', 'r');
+   plotFaces(G, bc.face, 'b');
+   title('Boundary conditions and source-cells')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+   h = gca;
+
+%% Construct and solve the linear system
+% Construct mimetic pressure linear system components for the system Ax = b
+%
+% $$ A x = \left[\begin{array}{ccc}
+%                  B & C & D \\ C' & 0 & 0 \\ D' & 0 & 0
+%           \end{array}\right]
+%           \left[\begin{array}{c} v \\ \textbf{REPLACE_WITH_DASH_DASH}p \\ \lambda \end{array}\right]
+%         = [\mbox{RHS}] = b $$
+%
+% based on input grid and rock properties. For more details of the linear
+% system, see the <simpleBC.html basic tutorial example>.
+S = computeMimeticIP(G, rock, 'Verbose', true);
+
+%%
+% Compute the solution for the system with sources and boundary conditions
+rSol = initResSol(G, 0);
+rSol = solveIncompFlow(rSol, G, S, fluid, 'MatrixOutput', true, ...
+                       'src', src, 'bc', bc);
+
+%% Plot output
+% We convert the cell pressure to unit bar and the fluxes to unit m^3/day
+% when plotting the results. Although it is not strictly necessary here, we
+% show how to make shorthands to simplify the plotting.
+cellNo    = rldecode(1:G.cells.num, diff(G.cells.facePos), 2) .';
+plot_var  = @(x) plotCellData(G, x);
+plot_pres = @(x) plot_var(convertTo(x.pressure(1:G.cells.num), barsa()));
+plot_flux = @(x) plot_var(accumarray(cellNo, ...
+   abs(convertTo(faceFlux2cellFlux(G, x.flux), meter^3/day))));
+
+set(h,'Position',pos); % move first plot to subplot(2,2,1);
+
+subplot(2,2,2)
+   spy(rSol.A)
+   title('System matrix')
+
+subplot(2,2,3)
+   plot_pres(rSol);
+   title('Pressure [bar]')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+
+subplot(2,2,4)
+   plot_flux(rSol);
+   title('Sqrt of flux intensity [m^3/day]')
+   view(3), camproj perspective, axis tight equal, camlight headlight
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>

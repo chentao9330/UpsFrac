@@ -1,0 +1,363 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML was auto-generated from MATLAB code.
+To make changes, update the MATLAB code and republish this document.
+      --><title>Pressure Solver with capillary pressure:</title><meta name="generator" content="MATLAB 7.13"><link rel="schema.DC" href="http://purl.org/dc/elements/1.1/"><meta name="DC.date" content="2012-12-19"><meta name="DC.source" content="simple2phPcExample.m"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Pressure Solver with capillary pressure:</h1><!--introduction--><p>Here, we demonstrate the effect of capillary pressure on the solution of a two-phase oil-water problem. We solve the two-phase pressure equation</p><p><img src="simple2phPcExample_eq71054.png" alt="$$\nabla\cdot v = q, \qquad v=\textbf{--}\lambda_t K\nabla p,$$"></p><p>where v is the Darcy velocity (total velocity) and lambda_t is the total mobility, which depends on the water saturation S.</p><p>The saturation equation (conservation of the water phase) is given as:</p><p><img src="simple2phPcExample_eq58982.png" alt="$$ \phi \frac{\partial S}{\partial t} +&#xA;    \nabla \cdot (f_w(S)(v + K\lambda_o \nabla p_c)) = q_w$$"></p><p>This tutorial shows a 2D case with homogeneous permeability and
+porosity and linear capillary pressure curve and is based on the example
+<a href="simple2phWellExample.html>simple2phWellExample.m</a>.
+</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Construct simple Cartesian test case</a></li><li><a href="#2">Define fluid and capillary pressure curve</a></li><li><a href="#6">Plot the pc-curve</a></li><li><a href="#7">Set wells</a></li><li><a href="#8">Set up solution structures and assemble linear system</a></li><li><a href="#9">Set up pressure and transport solvers</a></li><li><a href="#11">Solve initial pressure in reservoir</a></li><li><a href="#12">Transport loop</a></li><li><a href="#13">Start the main loop</a></li><li><a href="#14">Plot water breakthrough at heel</a></li></ul></div><h2>Construct simple Cartesian test case<a name="1"></a></h2><pre class="codeinput">nx = 40; ny = 40; nz = 1;
+G         = cartGrid([nx ny nz]);
+G         = computeGeometry(G);
+rock.perm = repmat(100*milli*darcy, [G.cells.num, 1]);
+rock.poro = repmat(0.3            , [G.cells.num, 1]);
+
+x = linspace(0, 1, 11) .';
+y = linspace(1, 0, 11) .';
+</pre><h2>Define fluid and capillary pressure curve<a name="2"></a></h2><p>We define the relative permeability and the capillary pressure in form of tables, and let the relative permeability curves be quadratic and the capillary function linear. The strength of the capillary pressure is decided by cap_scale. The capillary pressure is defined in the non-wetting phase, i.e. <img src="simple2phPcExample_eq34878.png" alt="$$ p_c = p_{nw} - p_w $$">.</p><pre class="codeinput">pc_form = <span class="string">'nonwetting'</span>;
+cap_scale = 10;
+[kr, pc]  = tabulatedSatFunc([x, x.^2, y.^2, y.*cap_scale*barsa]);
+</pre><p>Define constant properties for viscosity and density</p><pre class="codeinput">props = constantProperties([   1,  10] .* centi*poise, <span class="keyword">...</span>
+                           [1000, 700] .* kilogram/meter^3);
+</pre><p>Here we put together a valid fluid object from the above defined functions. To read more about the fluid structure write help fluid_structure in MRST. First make a fluid without capillary pressure</p><pre class="codeinput">fluid = struct(<span class="string">'properties'</span>, props                  , <span class="keyword">...</span>
+               <span class="string">'saturation'</span>, @(x, varargin)    x.s  , <span class="keyword">...</span>
+               <span class="string">'relperm'</span>   , kr);
+</pre><p>Then make another fluid object identical to the one above except for the capillary pressure term 'pc'.</p><pre class="codeinput">fluid_pc = struct(<span class="string">'properties'</span>, props                  , <span class="keyword">...</span>
+                  <span class="string">'saturation'</span>, @(x, varargin)    x.s  , <span class="keyword">...</span>
+                  <span class="string">'relperm'</span>   , kr                     , <span class="keyword">...</span>
+                  <span class="string">'pc'</span>        , @(x, varargin) pc(x.s));
+</pre><h2>Plot the pc-curve<a name="6"></a></h2><p>Make a dummy state/solution structure to plot the pc curve since 'fluid.pc' demands state as an input</p><pre class="codeinput">xDummy   = initState(G, [], [0, 1]);
+xDummy.s = linspace(0, 1, numel(xDummy.s))'; <span class="keyword">...</span>
+pc = convertTo(fluid_pc.pc(xDummy), barsa);
+
+clf
+plot(xDummy.s, pc);
+xlabel(<span class="string">'s_w'</span>); ylabel(<span class="string">'pc [bar]'</span>);
+title(<span class="string">'Capillary pressure curve'</span>)
+</pre><img vspace="5" hspace="5" src="simple2phPcExample_01.png" alt=""> <h2>Set wells<a name="7"></a></h2><pre class="codeinput">rate = 0.5*meter^3/day;
+bhp  = 1*barsa;
+
+W = verticalWell([], G, rock, 1, 1, 1:nz,          <span class="keyword">...</span>
+                 <span class="string">'Type'</span>, <span class="string">'rate'</span>, <span class="string">'Val'</span>, rate, <span class="keyword">...</span>
+                 <span class="string">'Radius'</span>, .1, <span class="string">'Name'</span>, <span class="string">'I'</span>, <span class="string">'Comp_i'</span>, [1 0]);
+W = verticalWell(W, G, rock, nx, ny, 1:nz,     <span class="keyword">...</span>
+                 <span class="string">'Type'</span>,<span class="string">'bhp'</span>, <span class="string">'Val'</span>, bhp, <span class="keyword">...</span>
+                 <span class="string">'Radius'</span>, .1, <span class="string">'Dir'</span>, <span class="string">'x'</span>, <span class="string">'Name'</span>, <span class="string">'P'</span>, <span class="string">'Comp_i'</span>, [0 1]);
+</pre><h2>Set up solution structures and assemble linear system<a name="8"></a></h2><pre class="codeinput">rSol    = initState(G, W, 0, [0.2, 0.8]);
+rSol_pc = initState(G, W, 0, [0.2, 0.8]);
+
+gravity <span class="string">off</span>
+verbose = false;
+
+S  = computeMimeticIP(G, rock, <span class="string">'Verbose'</span>, verbose,<span class="string">'InnerProduct'</span>,<span class="string">'ip_tpf'</span>);
+</pre><h2>Set up pressure and transport solvers<a name="9"></a></h2><p>This example uses an implicit transport solver, an explicit solver can be used if the time step restriction for the parabolic term is less than for the hyperbolic term. This is the case if 'cap_scale' is small. We let 'fluid' be a parameter in 'psolve' and 'tsolve' so that we can use the solvers for simulation both with and without capillary pressure by supplying different fluid objects. For this case we use the verbose = false for the transport solver. If more information about the convergence of the method is required; use verbose = true.</p><pre class="codeinput">psolve  = @(state, fluid) solveIncompFlow(state, G, S, fluid, <span class="string">'wells'</span>, W);
+tsolve  = @(state, dT, fluid) implicitTransport(state, G, dT, rock, <span class="keyword">...</span>
+                                                fluid, <span class="string">'wells'</span>, W, <span class="keyword">...</span>
+                                                <span class="string">'verbose'</span>, verbose);
+</pre><p>Alternatively we could have defined an explicit transport solver by</p><pre class="codeinput"><span class="comment">% tsolve = @(state, dT) explicitTransport(state, G, dT, rock, fluid, ...</span>
+<span class="comment">%                                        'wells', W, 'verbose', verbose);</span>
+</pre><h2>Solve initial pressure in reservoir<a name="11"></a></h2><p>Observe that we supply different fluid objects for the two solutions, one with capillary pressure and one without.</p><pre class="codeinput">rSol    = psolve(rSol, fluid);
+rSol_pc = psolve(rSol_pc, fluid_pc);
+</pre><h2>Transport loop<a name="12"></a></h2><p>We solve the two-phase system using a sequential splitting in which the pressure and fluxes are computed by solving the flow equation and then held fixed as the saturation is advanced according to the transport equation.</p><pre class="codeinput">T      = 300*day();
+dT     = T/15;
+dTplot = 100*day();  <span class="comment">% plot only every 100th day</span>
+N      = fix(T/dTplot);
+pv     = poreVolume(G,rock);
+</pre><h2>Start the main loop<a name="13"></a></h2><pre class="codeinput">t  = 0; plotNo = 1;
+h1 = <span class="string">'No pc - '</span>; h2 = <span class="string">'Linear pc - '</span>;
+e = []; p_org = []; p_pc = [];
+figure;
+
+<span class="keyword">while</span> t &lt; T,
+   <span class="comment">% TRANSPORT SOLVE</span>
+   rSol    = tsolve(rSol, dT, fluid);
+   rSol_pc = tsolve(rSol_pc, dT, fluid_pc);
+
+   <span class="comment">% Check for inconsistent saturations</span>
+   s = [rSol.s(:,1); rSol_pc.s(:,1)];
+   assert(max(s) &lt; 1+eps &amp;&amp; min(s) &gt; -eps);
+
+   <span class="comment">% Update solution of pressure equation.</span>
+   rSol    = psolve(rSol,    fluid);
+   rSol_pc = psolve(rSol_pc, fluid_pc);
+
+   <span class="comment">% Measure water saturation in production cells in saturation</span>
+   e = [e; sum(abs(rSol.s(:,1) - rSol_pc.s(:,1)).*pv)/sum(pv)]; <span class="comment">%#ok</span>
+   p_org = [p_org; rSol.s(W(2).cells,1)' ];                 <span class="comment">%#ok</span>
+   p_pc  = [p_pc; rSol_pc.s(W(2).cells,1)'];                 <span class="comment">%#ok</span>
+
+   <span class="comment">% Increase time and continue if we do not want to plot saturations</span>
+   t = t + dT;
+   <span class="keyword">if</span> ( t &lt; plotNo*dTplot &amp;&amp; t &lt;T), <span class="keyword">continue</span>, <span class="keyword">end</span>
+
+   <span class="comment">% Plot saturation</span>
+   heading = [num2str(convertTo(t,day)),  <span class="string">' days'</span>];
+   r = 0.01;
+   subplot(<span class="string">'position'</span>,[(plotNo-1)/N+r, 0.50, 1/N-2*r, 0.48]), cla
+   plotCellData(G, rSol.s(:,1));
+   caxis([0 1]), view(60,50), axis <span class="string">equal</span> <span class="string">off</span>, title([h1 heading])
+
+   subplot(<span class="string">'position'</span>,[(plotNo-1)/N+r, 0.02, 1/N-2*r, 0.48]), cla
+   plotCellData(G, rSol_pc.s(:,1));
+   caxis([0 1]), view(60,50), axis <span class="string">equal</span> <span class="string">off</span>, title([h2 heading])
+
+   plotNo = plotNo+1;
+
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="simple2phPcExample_02.png" alt=""> <h2>Plot water breakthrough at heel<a name="14"></a></h2><p>As we clearly see from the plots in the figure, the simulation with capillary pressure has much more diffusion than the simulation without capillary pressure. This is confirmed by the water breakthrough curve.</p><pre class="codeinput">clf
+n = numel(p_org(:,1));
+plot(1:n,p_org(:,1),<span class="string">'-o'</span>,1:n,p_pc(:,1),<span class="string">'--*'</span>)
+legend(<span class="string">'No capillary pressure'</span>,<span class="string">'Linear capillary pressure'</span>,<span class="string">'Location'</span>,<span class="string">'Best'</span>);
+title(<span class="string">'Water breakthrough at heel'</span>);
+</pre><img vspace="5" hspace="5" src="simple2phPcExample_03.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.13<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Pressure Solver with capillary pressure:
+% Here, we demonstrate the effect of capillary pressure on the solution of
+% a two-phase oil-water problem. We solve the two-phase pressure equation
+%
+% $$\nabla\cdot v = q, \qquad v=\textbf{REPLACE_WITH_DASH_DASH}\lambda_t K\nabla p,$$
+%
+% where v is the Darcy velocity (total velocity) and lambda_t is the
+% total mobility, which depends on the water saturation S.
+%
+% The saturation equation (conservation of the water phase) is given as:
+%
+% $$ \phi \frac{\partial S}{\partial t} +
+%     \nabla \cdot (f_w(S)(v + K\lambda_o \nabla p_c)) = q_w$$
+%
+% <html>This tutorial shows a 2D case with homogeneous permeability and
+% porosity and linear capillary pressure curve and is based on the example
+% <a href="simple2phWellExample.html>simple2phWellExample.m</a>.
+% </html>
+
+%% Construct simple Cartesian test case
+nx = 40; ny = 40; nz = 1;
+G         = cartGrid([nx ny nz]);
+G         = computeGeometry(G);
+rock.perm = repmat(100*milli*darcy, [G.cells.num, 1]);
+rock.poro = repmat(0.3            , [G.cells.num, 1]);
+
+x = linspace(0, 1, 11) .';
+y = linspace(1, 0, 11) .';
+
+%% Define fluid and capillary pressure curve
+% We define the relative permeability and the capillary pressure in form of
+% tables, and let the relative permeability curves be quadratic and the
+% capillary function linear. The strength of the capillary pressure is
+% decided by cap_scale. The capillary pressure is defined in the
+% non-wetting phase, i.e. $$ p_c = p_{nw} - p_w $$.
+pc_form = 'nonwetting';
+cap_scale = 10;
+[kr, pc]  = tabulatedSatFunc([x, x.^2, y.^2, y.*cap_scale*barsa]);
+%%
+% Define constant properties for viscosity and density
+props = constantProperties([   1,  10] .* centi*poise, ...
+                           [1000, 700] .* kilogram/meter^3);
+                        
+%%
+% Here we put together a valid fluid object from the above defined
+% functions. To read more about the fluid structure write
+% help fluid_structure in MRST. First make a fluid without capillary
+% pressure
+fluid = struct('properties', props                  , ...
+               'saturation', @(x, varargin)    x.s  , ...
+               'relperm'   , kr);              
+%%                  
+% Then make another fluid object identical to the one above except for the
+% capillary pressure term 'pc'. 
+fluid_pc = struct('properties', props                  , ...
+                  'saturation', @(x, varargin)    x.s  , ...
+                  'relperm'   , kr                     , ...
+                  'pc'        , @(x, varargin) pc(x.s));    
+                          
+%% Plot the pc-curve
+% Make a dummy state/solution structure to plot the pc curve since
+% 'fluid.pc' demands state as an input
+xDummy   = initState(G, [], [0, 1]);
+xDummy.s = linspace(0, 1, numel(xDummy.s))'; ...
+pc = convertTo(fluid_pc.pc(xDummy), barsa);
+
+clf
+plot(xDummy.s, pc);
+xlabel('s_w'); ylabel('pc [bar]'); 
+title('Capillary pressure curve')
+
+
+%% Set wells
+rate = 0.5*meter^3/day;
+bhp  = 1*barsa;
+
+W = verticalWell([], G, rock, 1, 1, 1:nz,          ...
+                 'Type', 'rate', 'Val', rate, ...
+                 'Radius', .1, 'Name', 'I', 'Comp_i', [1 0]);
+W = verticalWell(W, G, rock, nx, ny, 1:nz,     ...
+                 'Type','bhp', 'Val', bhp, ...
+                 'Radius', .1, 'Dir', 'x', 'Name', 'P', 'Comp_i', [0 1]);
+
+
+%% Set up solution structures and assemble linear system
+rSol    = initState(G, W, 0, [0.2, 0.8]);
+rSol_pc = initState(G, W, 0, [0.2, 0.8]);
+
+gravity off
+verbose = false;
+
+S  = computeMimeticIP(G, rock, 'Verbose', verbose,'InnerProduct','ip_tpf');
+
+
+%% Set up pressure and transport solvers
+% This example uses an implicit transport solver, an explicit solver can be
+% used if the time step restriction for the parabolic term is less than for
+% the hyperbolic term. This is the case if 'cap_scale' is small. We let
+% 'fluid' be a parameter in 'psolve' and 'tsolve' so that we can use the
+% solvers for simulation both with and without capillary pressure by
+% supplying different fluid objects. For this case we use the verbose =
+% false for the transport solver. If more information about the convergence
+% of the method is required; use verbose = true. 
+
+psolve  = @(state, fluid) solveIncompFlow(state, G, S, fluid, 'wells', W);
+tsolve  = @(state, dT, fluid) implicitTransport(state, G, dT, rock, ...
+                                                fluid, 'wells', W, ...
+                                                'verbose', verbose);
+%%
+% Alternatively we could have defined an explicit transport solver by
+
+% tsolve = @(state, dT) explicitTransport(state, G, dT, rock, fluid, ...
+%                                        'wells', W, 'verbose', verbose); 
+
+%% Solve initial pressure in reservoir
+% Observe that we supply different fluid objects for the two solutions, one
+% with capillary pressure and one without.
+rSol    = psolve(rSol, fluid);
+rSol_pc = psolve(rSol_pc, fluid_pc);
+
+%% Transport loop
+% We solve the two-phase system using a sequential splitting in which the
+% pressure and fluxes are computed by solving the flow equation and then
+% held fixed as the saturation is advanced according to the transport
+% equation. 
+T      = 300*day();
+dT     = T/15;
+dTplot = 100*day();  % plot only every 100th day
+N      = fix(T/dTplot);
+pv     = poreVolume(G,rock);
+
+%% Start the main loop
+t  = 0; plotNo = 1; 
+h1 = 'No pc - '; h2 = 'Linear pc - ';
+e = []; p_org = []; p_pc = [];
+figure;
+
+while t < T,   
+   % TRANSPORT SOLVE
+   rSol    = tsolve(rSol, dT, fluid);  
+   rSol_pc = tsolve(rSol_pc, dT, fluid_pc);                           
+
+   % Check for inconsistent saturations
+   s = [rSol.s(:,1); rSol_pc.s(:,1)];
+   assert(max(s) < 1+eps && min(s) > -eps);
+
+   % Update solution of pressure equation.
+   rSol    = psolve(rSol,    fluid);
+   rSol_pc = psolve(rSol_pc, fluid_pc);
+
+   % Measure water saturation in production cells in saturation
+   e = [e; sum(abs(rSol.s(:,1) - rSol_pc.s(:,1)).*pv)/sum(pv)]; %#ok
+   p_org = [p_org; rSol.s(W(2).cells,1)' ];                 %#ok
+   p_pc  = [p_pc; rSol_pc.s(W(2).cells,1)'];                 %#ok
+
+   % Increase time and continue if we do not want to plot saturations
+   t = t + dT;
+   if ( t < plotNo*dTplot && t <T), continue, end
+
+   % Plot saturation
+   heading = [num2str(convertTo(t,day)),  ' days'];
+   r = 0.01;
+   subplot('position',[(plotNo-1)/N+r, 0.50, 1/N-2*r, 0.48]), cla
+   plotCellData(G, rSol.s(:,1));
+   caxis([0 1]), view(60,50), axis equal off, title([h1 heading])
+
+   subplot('position',[(plotNo-1)/N+r, 0.02, 1/N-2*r, 0.48]), cla
+   plotCellData(G, rSol_pc.s(:,1));
+   caxis([0 1]), view(60,50), axis equal off, title([h2 heading])
+
+   plotNo = plotNo+1; 
+
+end
+
+%% Plot water breakthrough at heel 
+% As we clearly see from the plots in the figure, the simulation with
+% capillary pressure has much more diffusion than the simulation without
+% capillary pressure. This is confirmed by the water breakthrough curve. 
+% 
+clf
+n = numel(p_org(:,1));
+plot(1:n,p_org(:,1),'-o',1:n,p_pc(:,1),'REPLACE_WITH_DASH_DASH*')
+legend('No capillary pressure','Linear capillary pressure','Location','Best');
+title('Water breakthrough at heel');
+
+%%
+displayEndOfDemoMessage(mfilename)
+
+##### SOURCE END #####
+--></body></html>
