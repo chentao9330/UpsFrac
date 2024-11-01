@@ -1,3 +1,4 @@
+![UpsFrac Logo](UFlogo.png)
 # UpsFrac
 
 UpsFrac is an open-source software designed for modeling and upscaling permeability in fractured porous rocks, aimed at enhancing the quantitative and multi-scale analysis of fracture systems in geosciences.
