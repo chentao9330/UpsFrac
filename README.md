@@ -27,22 +27,22 @@ DFM_simulation: developed based on ADFNE
 Requirements: rndm_powerlaw.m, frac_deterministic.txt
 Output: Fracture geometric files (e.g., frac_0_1.txt)
 
-Step 2: Run SubDivideToGrid.m
+### Step 2: Run SubDivideToGrid.m
 Output: Clipped fracture geometry in a coarse grid (e.g., resu_0_1.txt)
 
-Step 3: Run DiscreteFractureInput.m
+### Step 3: Run DiscreteFractureInput.m
 Requirements: Create InputTemplate_mpfa.m or use InputTemplate_tpfa.m
 Output: DFM simulation input files in folders (e.g., reali_1 folder)
 
-Step 4: Run GridDFMSimu.m
+### Step 4: Run GridDFMSimu.m
 Perform DFM simulation with the framework of MRST
 Output: Flow simulation results in the folder \reali_1\RESULT
 
-Step 5: Calculate upscaled equivalent permeability, keq, for a coarse grid
+### Step 5: Calculate upscaled equivalent permeability, keq, for a coarse grid
 Run CalcuKeq.m in the folder \reali_1\RESULT
 Output: Upscaled permeability in the file epcomf.txt
 
-Step 6: Visualization of upscaled equivalent permeability keq
+### Step 6: Visualization of upscaled equivalent permeability keq
 Run plot_keq.m, plot_keq_hist.m, and plot_keq_ellipse.m based on epcomf.txt
 Output: Figures of equivalent permeability in the coarse grid
 
