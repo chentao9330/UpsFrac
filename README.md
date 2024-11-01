@@ -22,8 +22,8 @@ DFM_modeling: developed based on MRST
 DFM_simulation: developed based on ADFNE
 
 
-Software Usage Steps
-Step 1: Run DiscreteFractureModeling.m
+## Software Usage Steps
+### Step 1: Run DiscreteFractureModeling.m
 Requirements: rndm_powerlaw.m, frac_deterministic.txt
 Output: Fracture geometric files (e.g., frac_0_1.txt)
 
@@ -47,8 +47,8 @@ Run plot_keq.m, plot_keq_hist.m, and plot_keq_ellipse.m based on epcomf.txt
 Output: Figures of equivalent permeability in the coarse grid
 
 
-License
+## License
 This project is licensed under the GPL 3 License. See the LICENSE file for details.
 
-Contact
+## Contact
 For questions or feedback, please contact Tao Chen at chentao9330@gmail.com.
