@@ -48,7 +48,7 @@ Output: Figures of equivalent permeability in the coarse grid
 
 
 ## License
-This project is licensed under the GPL 3 License. See the LICENSE file for details.
+This project is licensed under the GPL 3 License. See the LICENSE file for details. The ADFNE and MRST used should adhere to their respective licensing terms.
 
 ## Contact
 For questions or feedback, please contact Tao Chen at chentao9330@gmail.com.
