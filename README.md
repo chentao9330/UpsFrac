@@ -18,7 +18,7 @@ cd UpsFrac
 
 Add the following folders to the MATLAB path, and then you can start using the software:
 
-DFM_modeling: developed based on ADFNE
+DFM_modeling: developed based on ADFNE  
 DFM_simulation: developed based on MRST
 
 
