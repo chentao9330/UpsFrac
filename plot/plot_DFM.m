@@ -23,8 +23,11 @@ colors = zeros(numLines, 3); % Initialize color array
 a_normalized = (Aperture_0 - min(Aperture_0)) / (max(Aperture_0) - min(Aperture_0));
 
 % Create a colormap from blue to red
-for i = 1:numLines
-    colors(i, :) = [a_normalized(i), 0, 1 - a_normalized(i)]; % Interpolate color
+% Normalize 'a' to range [0, 1]
+if (max(Aperture_0) - min(Aperture_0)) == 0
+    a_normalized = 0.5 * ones(size(Aperture_0));  % constant aperture
+else
+    a_normalized = (Aperture_0 - min(Aperture_0)) / (max(Aperture_0) - min(Aperture_0));
 end
 
 % Plot each line with the corresponding color
