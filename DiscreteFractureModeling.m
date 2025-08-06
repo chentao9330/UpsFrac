@@ -68,10 +68,13 @@ for i = 1:num_real
     olines = [pts(:,1)-dx,pts(:,2)-dy,pts(:,1)+dx,pts(:,2)+dy]; %original
     lines = ClipLines2D(olines,rgn);
     
+
     %% combine stochastic and determintic fractures
-    lines_determ = load( 'frac_determintic.txt');
-    lines= [lines; lines_determ(:,1:4)];
-    Aperture_0= [Aperture_0; lines_determ(:,5)];
+    determ_data = load('frac_determintic.txt');
+    if ~isempty(determ_data)
+        lines = [lines; determ_data(:,1:4)];
+        Aperture_0 = [Aperture_0; determ_data(:,5)]; 
+    end
     
     %% Visualisation
     clf
