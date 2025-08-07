@@ -77,6 +77,16 @@ along with MRST.  If not, see <http://www.gnu.org/licenses/>.
 % $Revision: 6992 $
 
 % Written by Jostein R. Natvig, SINTEF ICT, 2009.
+%
+% Modified by: UpsFrac Development Team
+% Part of package: UpsFrac
+% Author: Tao Chen et al.
+% Email: chentao9330@gmail.com
+% Copyright (c) 2024 UpsFrac Developers.
+% All rights reserved.
+% Updated: Aug 2024
+% Modification: Added 'legacy' parameter to unique() function calls for 
+%               MATLAB version compatibility
 
    opt = struct('verbose',   mrstVerbose,   ...
                 'facetrans', zeros([0, 2]),...
@@ -135,7 +145,7 @@ along with MRST.  If not, see <http://www.gnu.org/licenses/>.
    DoBDo = Do'*B*Do;
 
    %% Invert DoBDo   
-   tmp      = unique([nno, subfno], 'rows');
+   tmp      = unique([nno, subfno], 'rows', 'legacy');
    p        = tmp(:,2);
    P        = sparse(1:numel(p), p, 1, numel(p), numel(p));
    [sz, sz] = rlencode(tmp(:,1));
@@ -274,7 +284,7 @@ if(opt.hybrid)
     
     hybrids=g.cells.hybrid(cno) & ~isHybface;
     
-    [~,hereMap]=unique(subfno,'first');
+    [~,hereMap]=unique(subfno,'first','legacy');
     
     next2Hybrids=hereMap(subfno(hybrids));
 
@@ -410,14 +420,14 @@ faceTags = double(g.faces.tags(fno));
 % subfno contains one or two indices, depending on whether the subface has
 % a neighbor or not. Obtain a mapping between the two neighbors (if they
 % exists)
-[~, hereMap] = unique(subfno,'first');
-[~,thereMap] = unique(subfno,'last');
+[~, hereMap] = unique(subfno,'first','legacy');
+[~,thereMap] = unique(subfno,'last','legacy');
 
 % Find all faces that are both on a fracture and belong to a hybrid cell
 fracFace = find(faceTags >= MIN_HYBRID_TAG_VAL & isHybridCell);
 
 % Pick one fracture interface for each interaction region,
-[~,I] = unique([nno,faceTags >= MIN_HYBRID_TAG_VAL],'rows');
+[~,I] = unique([nno,faceTags >= MIN_HYBRID_TAG_VAL],'rows','legacy');
 here = I(faceTags(I) >= MIN_HYBRID_TAG_VAL);
 
 % Nodes located on a fracture have multiple interaction regions, since the
@@ -450,14 +460,14 @@ while (~isempty(fracIntf_red) && count<100)
     
     % Pick next fracture face from the list of those that have not yet been
     % assigned an interaction region
-    [~,I] = unique(nno(fracIntf_red));
+    [~,I] = unique(nno(fracIntf_red),'legacy');
     here = fracIntf_red(I);
     
     % Find the region for this fracture face
     [thisRegion,subhintf_h,fracIntf_red] = oneStep(subfno,nno,cno,fno,g,here,fracIntf_red,hereMap,thereMap);
     
     % The new region must be assigned a unique node number
-    [old_N,I,J] = unique(nno(thisRegion));
+    [old_N,I,J] = unique(nno(thisRegion),'legacy');
     new_N = (new_N_num+1:new_N_num+length(I))';
     new_N_num = new_N_num+length(I);
     new_w(thisRegion,2) = new_N(J);
@@ -550,6 +560,12 @@ while (~isempty(there) && count < 100)
     
     count = count+1;
 end
+
+
+if count == 100
+    error('Error when splitting hybrid interaction regions for MPFA');
+end
+
 
 % Error if the loop reached the upper limit of iterations
 if ~isempty(here) && count == 100 
