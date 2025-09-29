@@ -8,7 +8,7 @@
 %%
 % Set the number of DFM realizations
 num_real = 1;     % Number of DFM realizations
-
+num_grid = 100;     % Number of DFM realizations
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -26,7 +26,7 @@ for reali=1:num_real
     pathr=pwd
     
     fn=r
-    sub=100
+    sub=num_grid
     cd (realf)
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

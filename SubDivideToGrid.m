@@ -9,13 +9,13 @@ clear all;
 clc;
 
 %%
-% Set the values for lx, ly, dx, dy, and tfrac
+% Set the values for Lx, Ly, dx, dy, and tfrac
 % Define the parameters for the model
-lx = 1000;        % Length of the model in the x-direction (m)
-ly = 1000;        % Length of the model in the y-direction (m)
+Lx = 1000;        % Length of the model in the x-direction (m)
+Ly = 1000;        % Length of the model in the y-direction (m)
 dx = 100;         % Length of the coarse grid in the x-direction (m)
 dy = 100;         % Length of the coarse grid in the y-direction (m)
-tfrac = 203;      % Total number of fractures in the model
+tfrac = 200;      % Total number of fractures in the model
 move_ratio = 0.001; % Precision factor for adjusting the corner points of fractures to enhance meshing efficiency
 num_real = 1;     % Number of DFM realizations
 
@@ -97,8 +97,8 @@ for reali = 1:num_real
     % disp(sp);
     
     % Calculate nx, ny, and tsub
-    nx = lx / dx;
-    ny = ly / dy;
+    nx = Lx / dx;
+    ny = Ly / dy;
     tsub = nx * ny;
     
     % Allocate memory for arrays
@@ -391,6 +391,3 @@ for reali = 1:num_real
         end
     end
 end
-
-
-

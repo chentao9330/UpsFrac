@@ -23,7 +23,8 @@ clc
 n = 200;
 
 %length of the square region
-L = 1000;
+Lx = 1000;
+Ly = 1000;
 
 %%
 % Set the number of DFM realizations
@@ -33,12 +34,12 @@ for i = 1:num_real
     a=num2str(i)
     
     %% region of the fracture network
-    rgn = [0,L,0,L];
+    rgn = [0,Lx,0,Ly];
     
     %% modeling location of the fractures
-    pts = L*rand(n,2);
+    pts = [Lx*rand(n,1), Ly*rand(n,1)];
     scatter(pts(:,1),pts(:,2))
-    axis([0 L 0 L])
+    axis([0 Lx 0 Ly])
     
     %% modeling orientation of the fracture network
     %orientation parameter
@@ -68,14 +69,26 @@ for i = 1:num_real
     olines = [pts(:,1)-dx,pts(:,2)-dy,pts(:,1)+dx,pts(:,2)+dy]; %original
     lines = ClipLines2D(olines,rgn);
     
-
-    %% combine stochastic and determintic fractures
-    determ_data = load('frac_determintic.txt');
-    if ~isempty(determ_data)
-        lines = [lines; determ_data(:,1:4)];
-        Aperture_0 = [Aperture_0; determ_data(:,5)]; 
-    end
+%     %% combine stochastic and determintic fractures
+%     lines_determ = load( 'frac_determintic.txt');
+%     lines= [lines; lines_determ(:,1:4)];
+%     Aperture_0= [Aperture_0; lines_determ(:,5)];
     
+    %% combine stochastic and determintic fractures
+    try
+        lines_determ = load('frac_determintic.txt');
+        if size(lines_determ, 2) >= 5 && size(lines_determ, 1) > 0
+            lines = [lines; lines_determ(:,1:4)];
+            Aperture_0 = [Aperture_0; lines_determ(:,5)];
+            fprintf('Successfully loaded %d deterministic fractures\n', size(lines_determ, 1));
+        else
+            error('File format is incorrect');
+        end
+    catch ME
+        fprintf('Warning: Unable to load deterministic fracture file: %s\n', ME.message);
+        fprintf('Using only randomly generated fractures\n');
+    end
+
     %% Visualisation
     clf
     [X,Y] = LinesToXYnan2D(lines);
@@ -99,23 +112,29 @@ for i = 1:num_real
             if lines(i,j)<0
                 lines(i,j)=0
             end
-            if lines(i,j)>L
-                lines(i,j)=L
+            if j==1 || j==3  % x×ø±ê
+                if lines(i,j)>Lx
+                    lines(i,j)=Lx
+                end
+            else  % y×ø±ê (j==2 »ò j==4)
+                if lines(i,j)>Ly
+                    lines(i,j)=Ly
+                end
             end
         end
         plot(X(:, i), Y(:, i), 'Color', colors(i, :)); % Use color based on 'a'
     end
     
-    axis([0 L 0 L])
+    axis([0 Lx 0 Ly])
     axis equal;
     
     % Set the plot range from 0 to L for both X and Y axes
-    xlim([0 L]);
-    ylim([0 L]);
+    xlim([0 Lx]);
+    ylim([0 Ly]);
     
     grid on;
-    set(gca,'Xtick',0:100:L);
-    set(gca,'Ytick',0:100:L);
+    set(gca,'Xtick',0:100:Lx);
+    set(gca,'Ytick',0:100:Ly);
     
     box on;
     

@@ -5,10 +5,10 @@
 % fluid flow problem is solved. The linear boundary condition is applied.
 
 % Create an initial distribution of points
-N     = 100;
-N1    = N;
-N2    = N;
-[X Y] = meshgrid(0:N/20:N1, 0:N/20:N2);
+% N     = 100;
+dx    = 100;
+dy    = 100;
+[X Y] = meshgrid(0:dx/20:dx, 0:dy/20:dy);%dx/20 and dy/20 are matrix grid size
 X     = X;
 Y     = Y;
 p     = [X(:), Y(:)];
@@ -30,7 +30,7 @@ vertices = [
 
 constraints = reshape(1 : size(vertices,1),2,[])' ;
 constraints = [constraints, (1 : size(constraints,1))'];
-box = [0 0; N1 N2];
+box = [0 0; dx dy];
 perimiter = h ;
 p = remove_closepoints(vertices,constraints,p,perimiter);
 args = struct('precision',0.00001);
@@ -38,7 +38,7 @@ args = struct('precision',0.00001);
 numOrdPt = size(p,1);
 p  = [p ; vertices];
 constraints(:,1:2) = constraints(:,1:2) + numOrdPt;
-[p, constraints, map] = partition_edges(p,constraints,N/30,box,args);
+[p, constraints, map] = partition_edges(p,constraints,dx/30,box,args);;%dx/30 is fracture size
 tags = constraints(:,3);
 constraints =  constraints(:,1:2);
 delTri     = DelaunayTri(p, constraints);
@@ -137,12 +137,12 @@ B=[G.faces.centroids]
 % 
 l=find(abs(B(:,1)-0)<1e-6) %find the first(1) column: x, the value is 0
 bl=l'
-r=find(abs(B(:,1)-N)<1e-6)
+r=find(abs(B(:,1)-dx)<1e-6)
 br=r'
 
 d=find(abs(B(:,2)-0)<1e-6)
 bd=d'
-u=find(abs(B(:,2)-N)<1e-6)
+u=find(abs(B(:,2)-dy)<1e-6)
 bu=u'
 
 
@@ -155,11 +155,11 @@ prob=i
     
 if prob==1
 
-bc = addBC([],bl, 'pressure', N);
+bc = addBC([],bl, 'pressure', dx);
 bc = addBC(bc,br, 'pressure', 0);
 
-bc = addBC(bc,bu, 'pressure', N-G.faces.centroids(bu,1));
-bc = addBC(bc,bd, 'pressure', N-G.faces.centroids(bd,1));
+bc = addBC(bc,bu, 'pressure', dx-G.faces.centroids(bu,1));
+bc = addBC(bc,bd, 'pressure', dx-G.faces.centroids(bd,1));
 
 fluid = initSimpleFluid('mu' , [   1,  1]*centi*poise     , ...
     'rho', [1014, 1014]*kilogram/meter^3, ...
@@ -188,11 +188,11 @@ fclose(fid)
 
 else
 
-bc = addBC([],bl, 'pressure', N-G.faces.centroids(bl,2));
-bc = addBC(bc,br, 'pressure', N-G.faces.centroids(br,2));
+bc = addBC([],bl, 'pressure', dy-G.faces.centroids(bl,2));
+bc = addBC(bc,br, 'pressure', dy-G.faces.centroids(br,2));
 
 bc = addBC(bc,bu, 'pressure', 0);
-bc = addBC(bc,bd, 'pressure', N);
+bc = addBC(bc,bd, 'pressure', dy);
 
 
 fluid = initSimpleFluid('mu' , [   1,  1]*centi*poise     , ...

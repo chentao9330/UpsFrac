@@ -10,7 +10,7 @@
 %%
 % Set the number of DFM realizations
 num_real = 1;     % Number of DFM realizations
-
+num_grid = 100;   % Number of Cartesian grid for a realization
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -32,7 +32,7 @@ for reali=1:num_real
     
     
     %grid number:100
-    for i=1:100
+    for i=1:num_grid
         grids=num2str(i)
         runf=strcat('s',grids,'.m')
         
